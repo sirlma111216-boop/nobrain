@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 260" role="img" aria-label="도형 그림">
+  <rect width="600" height="260" fill="#eef6ff"/>
+  <polygon points="100,50 175,200 25,200" fill="#ffd166" stroke="#2b2d42" stroke-width="8" stroke-linejoin="round"/>
+  <circle cx="300" cy="128" r="78" fill="#06d6a0" stroke="#2b2d42" stroke-width="8"/>
+  <rect x="428" y="52" width="148" height="148" rx="6" fill="#118ab2" stroke="#2b2d42" stroke-width="8"/>
+</svg>

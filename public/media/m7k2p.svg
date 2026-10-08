@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="둥근 벽시계">
+  <rect width="400" height="400" fill="#fff7e6"/>
+  <circle cx="200" cy="200" r="170" fill="#ffffff" stroke="#2b2d42" stroke-width="14"/>
+  <g stroke="#2b2d42" stroke-linecap="round">
+    <line x1="200" y1="44" x2="200" y2="70" stroke-width="8"/>
+    <line x1="356" y1="200" x2="330" y2="200" stroke-width="8"/>
+    <line x1="200" y1="356" x2="200" y2="330" stroke-width="8"/>
+    <line x1="44" y1="200" x2="70" y2="200" stroke-width="8"/>
+    <g stroke-width="4">
+      <line x1="278" y1="65" x2="270" y2="79"/><line x1="335" y1="122" x2="321" y2="130"/>
+      <line x1="335" y1="278" x2="321" y2="270"/><line x1="278" y1="335" x2="270" y2="321"/>
+      <line x1="122" y1="335" x2="130" y2="321"/><line x1="65" y1="278" x2="79" y2="270"/>
+      <line x1="65" y1="122" x2="79" y2="130"/><line x1="122" y1="65" x2="130" y2="79"/>
+    </g>
+  </g>
+  <g font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#2b2d42" text-anchor="middle" dominant-baseline="central">
+    <text x="200" y="96">12</text><text x="306" y="200">3</text><text x="200" y="304">6</text><text x="94" y="200">9</text>
+  </g>
+  <line x1="200" y1="200" x2="266" y2="200" stroke="#ef476f" stroke-width="16" stroke-linecap="round"/>
+  <line x1="200" y1="200" x2="200" y2="122" stroke="#2b2d42" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="200" cy="200" r="13" fill="#2b2d42"/>
+</svg>

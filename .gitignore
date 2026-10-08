@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
+!.dev.vars.example
+# 참가 코드·진행자 비밀번호·부하 시험 결과 — 절대 커밋하지 않는다
+private/
+loadtest/results/
+*.codes.csv
+*.log
+coverage/

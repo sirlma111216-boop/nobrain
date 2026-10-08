@@ -1,0 +1,9 @@
+# 로컬 개발용 비밀값 예시. `.dev.vars` 로 복사해서 값을 바꾼다. (.dev.vars 는 커밋 금지)
+# 배포 환경에서는 `npx wrangler secret put HOST_PASSWORD --env test` 처럼 넣는다.
+
+# 진행자 로그인 비밀번호 (16자 이상 권장)
+HOST_PASSWORD=change-me-local-host-password
+# 세션 쿠키 서명·참가 코드 해시·코드 암호화 키를 파생하는 비밀값 (32자 이상 무작위)
+SESSION_SECRET=change-me-to-a-long-random-string-at-least-32-chars
+# 로컬 검증 전용 기능(Object 강제 재시작). 배포 환경에는 절대 넣지 않는다.
+DEV_MODE=1
