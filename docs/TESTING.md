@@ -104,7 +104,25 @@ node loadtest/run.mjs --base http://127.0.0.1:8787 --n 1000 --hold 30 --max-conn
 - **측정 중 발견한 시험 환경 문제**: 처음 몇 번은 이전 `wrangler dev` 가 완전히 종료되지 않아 **같은 포트를 3개 프로세스가 LISTEN** 하고 있었습니다(요청이 서로 다른 로컬 DO 로 흩어짐). 그 결과는 모두 버렸습니다.
 - 목표(500명 p95 ≤ 2초)에 대해: 로컬에서는 817ms 였지만 **클라우드에서 검증하지 않았으므로 달성했다고 보지 않습니다.**
 
-## 5. 실행하지 않은 시험 (남은 검증)
+## 5. Cloudflare 배포 환경 기능 확인 (부하 아님)
+
+2026-10-09, `https://nobrain-festival-quiz-test.sirlma.workers.dev`, 참가자 3명·요청 수십 건:
+
+| 확인 | 결과 |
+|---|---|
+| 정적 화면·이미지, CSP·X-Frame-Options 헤더 | 200, 적용됨 |
+| 진행자 로그인: 틀린 비밀번호 / 맞는 비밀번호 | 401 / 200, 쿠키 `HttpOnly; SameSite=Lax; Secure` |
+| 행사 생성·참가 코드 3개·CSV 내보내기 | 정상 |
+| 입장 + WebSocket | 3/3, 입장 응답 122~127ms (DO 왕복 55~66ms) |
+| 학생의 진행자 명령 / 다른 출처 답안 / 세션 없는 요청 | 401 / 403 / 401 |
+| 문제 시작·마감 방송 수신 | 3/3 |
+| 제출 3건 / 같은 요청 재시도 / 마감 후 제출 | accepted / duplicate / closed |
+| 채점 | 제출 3·정답 2 (3시 O, 세 시 O, 4시 X) |
+| 참가자 메시지에 정답·집계 키 | 없음 |
+
+표본이 3명이라 성능 판단에는 쓰지 않습니다.
+
+## 6. 실행하지 않은 시험 (남은 검증)
 
 | 항목 | 상태 |
 |---|---|
@@ -115,7 +133,7 @@ node loadtest/run.mjs --base http://127.0.0.1:8787 --n 1000 --hold 30 --max-conn
 | 실제 Cloudflare 에서의 Hibernation·Alarm 지연 | 로컬에서만 관찰 |
 | overloaded 오류 경로 | 로컬에서 발생시키지 못함(코드상 503 + 클라이언트 재시도) |
 
-## 6. 클라우드 부하 시험 절차 (승인 후)
+## 7. 클라우드 부하 시험 절차 (승인 후)
 
 1. 시험용 Worker(`nobrain-festival-quiz-test`)에 배포되어 있는지 확인. 운영 행사가 진행 중이 아닐 것.
 2. 진행자 비밀번호를 환경변수로:
@@ -124,7 +142,7 @@ node loadtest/run.mjs --base http://127.0.0.1:8787 --n 1000 --hold 30 --max-conn
    ```
 3. 500명 1회:
    ```bash
-   node loadtest/run.mjs --base https://nobrain-festival-quiz-test.<하위도메인>.workers.dev --n 500 --cloud-ok --max-requests 6000 --max-seconds 600
+   node loadtest/run.mjs --base https://nobrain-festival-quiz-test.sirlma.workers.dev --n 500 --cloud-ok --max-requests 6000 --max-seconds 600
    ```
 4. 결과를 본 뒤 1,000명 1회(`--n 1000 --max-requests 12000`). 매번 새 시험 행사를 만듭니다(기존 행사에 영향 없음).
 5. 중단: Ctrl+C (연결을 닫고 그때까지 결과 저장). 상한에 닿으면 자동 중단.

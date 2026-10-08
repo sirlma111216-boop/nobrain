@@ -33,7 +33,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
 
 ## 4. 진행자·전광판 접근
-1. `https://nobrain-festival-quiz-test.<계정 하위 도메인>.workers.dev/host` 에서 진행자 비밀번호로 로그인
+1. `https://nobrain-festival-quiz-test.sirlma.workers.dev/host` (현재 배포 주소) 에서 진행자 비밀번호로 로그인
 2. **새 행사 만들기** → 행사 코드 6자리 확인
 3. **참가 코드** 칸에서 학생·교사 코드 생성 → **코드 CSV 내려받기** (또는 `node tools/codes.mjs --base <주소> --students 480 --teachers 20`, 비밀번호는 `HOST_PASSWORD` 환경변수)
 4. **전광판 링크 발급** → 무대 PC 에서 그 링크를 열고 **전체화면**. 링크는 학생에게 보이지 않게 하세요(새로 발급하면 이전 링크는 끊김)
