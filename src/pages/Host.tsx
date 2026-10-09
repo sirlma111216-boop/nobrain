@@ -266,7 +266,7 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
       </header>
 
       <section className="h-stats">
-        <Stat label="등록 인원" value={v.registered} />
+        <Stat label={v.bots ? `등록 인원 (봇 ${v.bots})` : '등록 인원'} value={v.registered} />
         <Stat label="현재 연결(참고)" value={v.connected} hint="네트워크 상태에 따라 늦게 반영될 수 있습니다" />
         <Stat label="이번 문제 제출" value={ph === 'open' || ph === 'closed' ? v.submitted : '-'} />
         <Stat label="전광판" value={v.boards} />
@@ -405,6 +405,8 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
         <p className="h-hint">CSV 파일에는 개인 참가 코드가 들어 있습니다. 공개 폴더·저장소에 올리지 마세요.</p>
       </section>
 
+      <BotsCard event={event} />
+
       <section className="h-card danger">
         <h2>시험 행사 초기화</h2>
         <p className="h-hint">답안·채점 결과·진행 기록을 지우고 대기실로 돌아갑니다. 되돌릴 수 없습니다.</p>
@@ -440,5 +442,84 @@ function Stat({ label, value, hint }: { label: string; value: number | string; h
       <div className="h-stat-v">{value}</div>
       <div className="h-stat-l">{label}</div>
     </div>
+  );
+}
+
+interface BotStatus {
+  running: boolean;
+  total: number;
+  joined: number;
+  connected: number;
+  submitted: number;
+  rejected: Record<string, number>;
+  errors: number;
+  stopsAt: number | null;
+  lastError: string | null;
+}
+
+const REJECT_KO: Record<string, string> = { closed: '마감 후 도착', superseded: '옛 버전', stale: '지난 문제', invalid: '형식 오류', rate_limited: '빈도 제한', not_open: '진행 중 아님', kicked: '세션 종료' };
+
+/** 연습용 봇: 서버가 실제 참가 경로(입장·WebSocket·답안 API)로 가짜 참가자를 움직인다. 진행자 화면에서만 쓴다. */
+function BotsCard({ event }: { event: string }) {
+  const [st, setSt] = useState<BotStatus | null>(null);
+  const [count, setCount] = useState(100);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setSt(await api<BotStatus>(`/api/host/bots?event=${event}`));
+    } catch {
+      /* 다음 주기에 다시 */
+    }
+  }, [event]);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 3000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  const act = async (action: 'start' | 'stop') => {
+    if (action === 'stop' && !window.confirm('봇 연결을 끊고, 봇이 낸 답안·결과를 서버에서 지울까요?')) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await api<{ status: BotStatus; removed?: number }>('/api/host/bots', { body: { event, action, count }, timeoutMs: 60_000 });
+      setSt(r.status);
+      setMsg({ ok: true, text: action === 'start' ? `봇 ${count}명을 불렀습니다. 몇 초에 걸쳐 차례로 들어옵니다.` : `봇을 내보냈습니다. 봇 자료 ${r.removed ?? 0}명분을 지우고 다시 채점했습니다.` });
+    } catch (e) {
+      setMsg({ ok: false, text: (e as ApiError).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rejected = st ? Object.entries(st.rejected).map(([k, n]) => `${REJECT_KO[k] ?? k} ${n}`).join(', ') : '';
+  return (
+    <section className="h-card">
+      <h2>연습용 봇 (리허설)</h2>
+      <p className="h-hint">
+        가짜 참가자가 <b>진짜 휴대폰과 같은 경로</b>(참가 코드 입장 → 실시간 연결 → 답안 제출)로 들어와 문제마다 답을 냅니다.
+        정답·오답·답 고치기·무응답·마감 직전 제출이 섞여 있습니다. 이름에는 "(봇)"이 붙고, 60분이 지나면 자동으로 멈춥니다.
+      </p>
+      <div className="h-row">
+        <input className="h-input short" type="number" min={1} max={200} value={count} onChange={(e) => setCount(Number(e.target.value))} />
+        <button className="h-btn primary" disabled={busy || !(count >= 1 && count <= 200)} onClick={() => act('start')}>
+          {st?.running ? '봇 다시 부르기' : '봇 불러오기'}
+        </button>
+        <button className="h-btn warn" disabled={busy} onClick={() => act('stop')}>봇 내보내기·정리</button>
+      </div>
+      {st?.running && (
+        <p className="h-hint">
+          실행 중: 입장 {st.joined}/{st.total} · 연결 {st.connected} · 접수된 제출 {st.submitted}
+          {rejected && ` · 거부(정상 동작 포함) ${rejected}`}
+          {st.errors > 0 && ` · 오류 ${st.errors}(${st.lastError})`}
+          {st.stopsAt && ` · ${new Date(st.stopsAt).toLocaleTimeString('ko-KR')} 자동 종료`}
+        </p>
+      )}
+      {st && !st.running && <p className="h-hint">봇이 없습니다.</p>}
+      {msg && <p className={msg.ok ? 'h-ok' : 'h-err'}>{msg.text}</p>}
+    </section>
   );
 }

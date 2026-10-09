@@ -21,6 +21,8 @@ export interface Question {
   accepted: string[];
   explanation: string;
   rules: GradingRules;
+  /** (선택) 연습용 봇이 낼 흔한 오답. 채점에는 쓰지 않는다 */
+  decoys?: string[];
 }
 
 export const QUESTIONS: Question[] = [
@@ -34,6 +36,7 @@ export const QUESTIONS: Question[] = [
     accepted: ['3시', '세시', '세 시', '3:00'],
     explanation: '짧은 바늘이 3을, 긴 바늘이 12를 가리키면 정각 3시예요.',
     rules: { ignoreSpaces: true, caseInsensitive: true },
+    decoys: ['9시', '4시', '12시', '3시 15분'],
   },
   {
     id: 'q-shape-01',
@@ -45,6 +48,7 @@ export const QUESTIONS: Question[] = [
     accepted: ['원', '동그라미', '원형'],
     explanation: '왼쪽부터 삼각형 · 원 · 사각형 순서예요. 가운데는 원!',
     rules: { ignoreSpaces: true, caseInsensitive: true },
+    decoys: ['삼각형', '네모', '공', '세모'],
   },
   {
     id: 'q-apple-01',
@@ -56,6 +60,7 @@ export const QUESTIONS: Question[] = [
     accepted: ['3', '3개', '세개', '세 개'],
     explanation: '사과가 하나, 둘, 셋 — 모두 3개예요.',
     rules: { ignoreSpaces: true, caseInsensitive: true },
+    decoys: ['4개', '2개', '토마토', '5개'],
   },
 ];
 

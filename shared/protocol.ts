@@ -82,6 +82,7 @@ export interface HostView {
   now: number;
   boot: string; // Object 인스턴스 식별값(재시작·Hibernation 관찰용)
   registered: number;
+  bots: number; // 등록 인원 중 연습용 봇
   connected: number; // 참고치(네트워크 상태에 따라 지연)
   boards: number;
   submitted: number; // 현재 문제 제출 인원

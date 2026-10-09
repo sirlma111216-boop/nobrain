@@ -4,6 +4,7 @@
 
 import { QUESTIONS } from './quiz/bank';
 import { EventDO, type SubmitBody } from './event-do';
+import { BotsDO } from './bots-do';
 import {
   COOKIE,
   ConfigError,
@@ -25,7 +26,33 @@ import {
   type PlayerToken,
 } from './auth';
 
-export { EventDO };
+export { EventDO, BotsDO };
+
+const MAX_BOTS = 200;
+
+function botsStub(env: Env, ev: string): DurableObjectStub<BotsDO> {
+  return env.BOTS.get(env.BOTS.idFromName('bots:' + ev)) as DurableObjectStub<BotsDO>;
+}
+
+/** 참가 코드를 만들어 행사에 등록하고, 등록된 코드(평문)와 이름을 돌려준다 */
+async function createCodes(env: Env, stub: DurableObjectStub<EventDO>, ev: string, count: number, kind: string) {
+  let pending = count;
+  const made: { code: string; name: string }[] = [];
+  for (let attempt = 0; attempt < 4 && pending > 0; attempt++) {
+    const plain: string[] = [];
+    const items = [];
+    for (let i = 0; i < pending; i++) {
+      const c = randomCode(PART_CODE_LEN);
+      plain.push(c);
+      items.push({ hash: await codeHash(env.SESSION_SECRET, ev, c), enc: await encryptCode(env.SESSION_SECRET, c), kind });
+    }
+    const r = await stub.addParticipants(items);
+    r.names.forEach((n, i) => n && made.push({ code: plain[i], name: n }));
+    pending = r.failed.length;
+    if (r.inserted === 0) break; // 최대 인원 초과 등
+  }
+  return made;
+}
 
 const EVENT_CODE_LEN = 6;
 const PART_CODE_LEN = 8;
@@ -309,30 +336,46 @@ async function route(req: Request, env: Env): Promise<Response> {
       const ev = eventParam(b.event);
       const count = Number(b.count);
       const kind = typeof b.kind === 'string' ? b.kind : '';
-      if (!['student', 'teacher', 'load'].includes(kind)) throw new HttpError(400, 'KIND', '구분이 올바르지 않습니다.');
+      if (!['student', 'teacher', 'load'].includes(kind)) // 'bot' 은 봇 실행 API 로만 throw new HttpError(400, 'KIND', '구분이 올바르지 않습니다.');
       if (!Number.isInteger(count) || count < 1 || count > 1000) throw new HttpError(400, 'COUNT', '한 번에 1~1000개까지 만들 수 있습니다.');
       const stub = eventStub(env, ev);
       if (!(await stub.exists()).exists) throw new HttpError(404, 'NO_EVENT', '행사를 찾을 수 없습니다.');
-      let pending = count;
-      let inserted = 0;
-      for (let attempt = 0; attempt < 4 && pending > 0; attempt++) {
-        const items = [];
-        for (let i = 0; i < pending; i++) {
-          const c = randomCode(PART_CODE_LEN);
-          items.push({ hash: await codeHash(env.SESSION_SECRET, ev, c), enc: await encryptCode(env.SESSION_SECRET, c), kind });
-        }
-        const r = await stub.addParticipants(items);
-        inserted += r.inserted;
-        pending = r.failed.length;
-        if (r.inserted === 0) break; // 최대 인원 초과 등
+      const made = await createCodes(env, stub, ev, count, kind);
+      return json({ ok: true, inserted: made.length, requested: count });
+    }
+
+    // 연습용 봇: 실제 참가 경로(입장·WebSocket·답안 API)로 움직이는 가짜 참가자
+    if (path === '/api/host/bots' && method === 'GET') {
+      const ev = eventParam(url.searchParams.get('event'));
+      return json(await botsStub(env, ev).status());
+    }
+    if (path === '/api/host/bots' && method === 'POST') {
+      const b = await readJson(req);
+      const ev = eventParam(b.event);
+      const stub = eventStub(env, ev);
+      if (!(await stub.exists()).exists) throw new HttpError(404, 'NO_EVENT', '행사를 찾을 수 없습니다.');
+      const bots = botsStub(env, ev);
+      if (b.action === 'stop') {
+        const r = await bots.stop();
+        const r2 = await stub.removeBots(); // 실행기가 재시작돼 기억을 잃었어도 남은 봇 자료를 걷어낸다
+        return json({ ok: true, removed: r.removed + r2.removed, status: await bots.status() });
       }
-      return json({ ok: true, inserted, requested: count });
+      if (b.action === 'start') {
+        const count = Number(b.count);
+        if (!Number.isInteger(count) || count < 1 || count > MAX_BOTS) throw new HttpError(400, 'COUNT', `봇은 1~${MAX_BOTS}명까지 부를 수 있습니다.`);
+        await bots.stop(); // 이전 봇 정지
+        await stub.removeBots(); // 남아 있던 봇 자료 정리
+        const made = await createCodes(env, stub, ev, count, 'bot');
+        const status = await bots.start(ev, url.origin, made);
+        return json({ ok: true, status });
+      }
+      throw new HttpError(400, 'ACTION', '잘못된 요청입니다.');
     }
 
     if (path === '/api/host/export/codes' && method === 'GET') {
       const ev = eventParam(url.searchParams.get('event'));
       const rows = await eventStub(env, ev).exportCodes();
-      const kindKo: Record<string, string> = { student: '학생', teacher: '교사', load: '부하시험' };
+      const kindKo: Record<string, string> = { student: '학생', teacher: '교사', load: '부하시험', bot: '연습봇' };
       const out: unknown[][] = [['이름', '구분', '행사코드', '참가코드', '입장주소']];
       for (const r of rows) {
         const c = await decryptCode(env.SESSION_SECRET, r.enc);

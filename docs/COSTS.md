@@ -50,6 +50,11 @@
 + 코드 생성(참가자 1명당 DO 내부 쓰기 1행), 결과 내보내기. 5~10회 반복해도 수만 요청 수준.
 부하 시험 도구는 `--max-requests`(기본 20,000)·`--max-seconds`(기본 900) 상한에서 멈추고 Ctrl+C 로 즉시 중단할 수 있다.
 
+### 연습용 봇 100명, 3문항 1회
+- DO 요청: 입장 100 + WebSocket 100 + 제출 약 250(수정 포함) + 봇 실행기 호출 몇 건 ≈ **500** (봇 요청은 Worker 를 거치므로 Worker 요청도 비슷한 수)
+- 봇 실행기(BotsDO)는 바깥으로 연결한 WebSocket 때문에 실행 중에는 메모리에서 내려가지 않습니다. 최대 60분 × 128MB ≈ **450 GB-s** (포함량 40만 GB-s)
+- 끝나면 "봇 내보내기·정리"로 연결을 끊으면 그때부터 Duration 이 늘지 않습니다.
+
 ## 사용량 확인 방법
 1. Cloudflare 대시보드 → **Workers & Pages** → `nobrain-festival-quiz-test` → **Metrics**: 요청 수·오류·CPU 시간
 2. 같은 Worker → **Durable Objects** 탭(또는 Storage & Databases → Durable Objects): 요청 수·Duration·저장 용량·행 읽기/쓰기

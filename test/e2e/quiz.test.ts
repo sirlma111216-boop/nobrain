@@ -469,6 +469,48 @@ describe('다음 문제·종료·초기화', () => {
   });
 });
 
+describe('연습용 봇', () => {
+  it('진행자가 부른 봇이 실제 경로로 입장·답안 제출하고, 정리하면 서버에서 지워진다', async () => {
+    const h2 = await hostLogin(base, password);
+    const ev = await Host.create(h2, '봇 시험');
+    await ev.genCodes(1, 'student');
+    const [c] = await ev.codes();
+    const realBot = new Bot(base);
+    await realBot.join(ev.event, c.code);
+    await realBot.connect();
+    // 학생은 봇을 부를 수 없다
+    expect((await realBot.http.post('/api/host/bots', { event: ev.event, action: 'start', count: 5 })).status).toBe(401);
+    expect((await h2.post('/api/host/bots', { event: ev.event, action: 'start', count: 999 })).status).toBe(400);
+    const r = await h2.post('/api/host/bots', { event: ev.event, action: 'start', count: 20 });
+    expect(r.status).toBe(200);
+    expect(await until(async () => (await h2.get('/api/host/bots?event=' + ev.event)).data.connected === 20, 20000, 500)).toBe(true);
+    await ev.refresh();
+    expect(ev.view.bots).toBe(20);
+    expect(ev.view.connected).toBe(21); // 봇 연결도 진짜 참가자 WebSocket 으로 집계됨
+    await ev.mustCmd('next');
+    await ev.mustCmd('start');
+    await realBot.waitFor((b: Bot) => b.view?.phase === 'open');
+    await realBot.submit('3시');
+    await sleep(16000);
+    await ev.mustCmd('close');
+    const res = await ev.results();
+    const botRows = res.rows.filter((x: any) => x.kind === 'bot');
+    expect(botRows.length).toBe(20);
+    expect(botRows[0].name).toMatch(/\(봇\)$/);
+    expect(botRows.filter((x: any) => x.cells[0]).length).toBeGreaterThan(5); // 대부분 제출(일부는 무응답·느림)
+    const st = (await h2.get('/api/host/bots?event=' + ev.event)).data;
+    expect(st.errors).toBe(0);
+    const stop = await h2.post('/api/host/bots', { event: ev.event, action: 'stop' });
+    expect(stop.data.removed).toBe(20);
+    const after = await ev.results();
+    expect(after.rows.map((x: any) => x.kind)).toEqual(['student']);
+    expect(after.runs[0]).toMatchObject({ total: 1, correct: 1 }); // 봇 답을 빼고 다시 채점
+    await ev.refresh();
+    expect(ev.view.bots).toBe(0);
+    realBot.disconnect();
+  }, 60000);
+});
+
 describe('진행자 로그인 방어', () => {
   it('틀린 비밀번호를 반복하면 해당 IP 를 잠근다', async () => {
     const ipHeaders = { 'CF-Connecting-IP': '203.0.113.77' };

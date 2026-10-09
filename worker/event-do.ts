@@ -144,7 +144,9 @@ export interface CmdResult {
   view?: HostView;
 }
 
-const KIND_PREFIX: Record<string, string> = { student: '학생', teacher: '교사', load: '부하' };
+const KIND_PREFIX: Record<string, string> = { student: '학생', teacher: '교사', load: '부하', bot: '봇' };
+// 연습용 봇 이름(진짜 학생 이름과 겹치지 않게 '(봇)' 을 붙인다)
+const BOT_NICKS = ['가람', '나래', '다올', '라온', '마루', '바다', '보람', '빛나', '새롬', '솔빛', '아라', '여름', '온새', '우람', '윤슬', '이슬', '자람', '초롱', '타리', '파랑', '푸름', '하늘', '한별', '해든', '햇살', '호수', '가온', '누리', '다솜', '도담', '미르', '별하', '봄이', '샛별', '소담', '시내', '은솔', '지음', '찬솔', '하람'];
 const MAX_PARTICIPANTS = 3000;
 const HOST_FLUSH_MS = 500; // 진행자 화면 집계 갱신 묶음 간격
 const JOIN_FAIL_WINDOW_MS = 5 * 60_000;
@@ -250,9 +252,10 @@ export class EventDO extends DurableObject<Env> {
   }
 
   // ───────────── 참가자 ─────────────
-  addParticipants(items: { hash: string; enc: string; kind: string }[]): { inserted: number; failed: number[] } {
-    if (!this.st) return { inserted: 0, failed: items.map((_, i) => i) };
+  addParticipants(items: { hash: string; enc: string; kind: string }[]): { inserted: number; failed: number[]; names: (string | null)[] } {
+    if (!this.st) return { inserted: 0, failed: items.map((_, i) => i), names: items.map(() => null) };
     const failed: number[] = [];
+    const names: (string | null)[] = items.map(() => null);
     let inserted = 0;
     this.ctx.storage.transactionSync(() => {
       for (let i = 0; i < items.length; i++) {
@@ -269,7 +272,10 @@ export class EventDO extends DurableObject<Env> {
         }
         const n = this.sql.exec<{ c: number }>(`SELECT COUNT(*) AS c FROM participants WHERE kind=?`, it.kind).one().c + 1;
         const width = it.kind === 'load' ? 4 : 3;
-        const name = prefix + String(n).padStart(width, '0');
+        const name =
+          it.kind === 'bot'
+            ? BOT_NICKS[(n - 1) % BOT_NICKS.length] + (n > BOT_NICKS.length ? String(Math.ceil(n / BOT_NICKS.length)) : '') + '(봇)'
+            : prefix + String(n).padStart(width, '0');
         this.sql.exec(
           `INSERT INTO participants (code_hash, code_enc, name, kind, created_at) VALUES (?,?,?,?,?)`,
           it.hash,
@@ -278,12 +284,44 @@ export class EventDO extends DurableObject<Env> {
           it.kind,
           Date.now(),
         );
+        names[i] = name;
         inserted++;
       }
     });
     this.registered += inserted;
     this.scheduleHostFlush();
-    return { inserted, failed };
+    return { inserted, failed, names };
+  }
+
+  /** 연습용 봇의 참가자·답안·결과를 지우고, 마감된 문제는 다시 채점한다(멱등) */
+  removeBots(): { removed: number } {
+    if (!this.st) return { removed: 0 };
+    const pids = this.sql.exec<{ pid: number }>(`SELECT pid FROM participants WHERE kind='bot'`).toArray().map((x) => x.pid);
+    if (!pids.length) return { removed: 0 };
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(`DELETE FROM answers WHERE pid IN (SELECT pid FROM participants WHERE kind='bot')`);
+      this.sql.exec(`DELETE FROM results WHERE pid IN (SELECT pid FROM participants WHERE kind='bot')`);
+      this.sql.exec(`DELETE FROM participants WHERE kind='bot'`);
+      for (const r of this.sql.exec<{ run: number }>(`SELECT run FROM rounds WHERE status='closed'`).toArray()) this.gradeRun(r.run);
+      this.st!.sv++;
+      this.saveState();
+    });
+    for (const pid of pids) {
+      this.genCache.delete(pid);
+      this.buckets.delete(pid);
+      for (const ws of this.ctx.getWebSockets('p:' + pid)) {
+        try {
+          ws.close(4401, 'bot-removed');
+        } catch {
+          /* 무시 */
+        }
+      }
+    }
+    this.load(); // 등록 인원·현재 문제·제출 인원을 SQLite 기준으로 다시 계산
+    this.top = null;
+    this.broadcastBoards();
+    this.flushHosts();
+    return { removed: pids.length };
   }
 
   exportCodes(): { name: string; kind: string; enc: string }[] {
@@ -916,6 +954,7 @@ export class EventDO extends DurableObject<Env> {
       now: Date.now(),
       boot: this.boot,
       registered: this.registered,
+      bots: this.sql.exec<{ c: number }>(`SELECT COUNT(*) AS c FROM participants WHERE kind='bot'`).one().c,
       connected: pids.size,
       boards: this.ctx.getWebSockets('b').length,
       submitted: this.submitted,
