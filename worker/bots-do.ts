@@ -9,7 +9,6 @@
 // 봇 데이터는 서버에서 지운다: 중지·자동 종료(60분) 때 EventDO.removeBots() 로 참가자·답안·결과를 지우고 다시 채점한다.
 
 import { DurableObject } from 'cloudflare:workers';
-import { QUESTION_BY_ID } from './quiz/bank';
 import type { PlayerView, SubmitResult } from '../shared/protocol';
 import type { EventDO } from './event-do';
 
@@ -77,6 +76,7 @@ export class BotsDO extends DurableObject<Env> {
   private stopsAt: number | null = null;
   private stats = { submitted: 0, rejected: {} as Record<string, number>, errors: 0, lastError: null as string | null };
   private stopping = false;
+  private qmap = new Map<string, { accepted: string[]; decoys: string[] }>();
   private pingTimer: ReturnType<typeof setInterval> | null = null;
 
   status(): BotStatus {
@@ -96,8 +96,15 @@ export class BotsDO extends DurableObject<Env> {
   }
 
   /** 봇 시작. codes 는 방금 만든 봇용 참가 코드(평문). 입장은 joinSpreadMs 동안 흩어서 한다. */
-  async start(ev: string, origin: string, codes: { code: string; name: string }[], joinSpreadMs = 8000): Promise<BotStatus> {
+  async start(
+    ev: string,
+    origin: string,
+    codes: { code: string; name: string }[],
+    questions: { id: string; accepted: string[]; decoys: string[] }[],
+    joinSpreadMs = 8000,
+  ): Promise<BotStatus> {
     await this.halt();
+    this.qmap = new Map(questions.map((q) => [q.id, q]));
     this.stopping = false;
     this.ev = ev;
     this.origin = origin;
@@ -270,13 +277,13 @@ export class BotsDO extends DurableObject<Env> {
 
   /** 문제가 열렸을 때 이 사람이 언제 무엇을 낼지 정한다 */
   private plan(b: Bot, v: PlayerView) {
-    const q = v.qid ? QUESTION_BY_ID.get(v.qid) : undefined;
+    const q = v.qid ? this.qmap.get(v.qid) : undefined;
     if (!q || !v.endsAt || b.persona.silent) return;
     const now = Date.now();
     const offset = v.now - now; // 서버 시각 보정
     const left = v.endsAt - (now + offset);
     const right = () => pick(q.accepted);
-    const wrong = () => pick(q.decoys?.length ? q.decoys : ['모르겠어요']);
+    const wrong = () => pick(q.decoys.length ? q.decoys : ['모르겠어요', '음…', '???']);
     const firstRight = Math.random() < b.persona.accuracy;
     const first = firstRight ? right() : wrong();
     let at = rnd(b.persona.paceMin, b.persona.paceMax);

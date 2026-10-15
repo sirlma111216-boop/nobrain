@@ -17,7 +17,9 @@
 |---|---|
 | `worker/index.ts` | 쿠키 세션 서명 검증, Origin·CSRF 검사, 참가 코드 HMAC 해시·AES 암호화, 라우팅. **무상태 CPU 작업을 여기서 처리**해 여러 인스턴스로 분산하고, DO 에는 검증된 참가자 ID 만 넘긴다. |
 | `worker/event-do.ts` | 행사 상태 머신, 답안 접수·마감·채점·재채점, 실시간 방송, 결과 내보내기. |
-| `worker/quiz/bank.ts` | 문제·정답(서버 전용). `src/` 에서 import 하지 않는다. |
+| `worker/library-do.ts` | 진행자가 화면에서 만든 문제세트·문제·사진(SQLite BLOB) 보관. 행사를 만들 때 세트 복사본을 EventDO 로 넘긴다. |
+| `worker/bots-do.ts` | 연습용 봇 실행기(실제 참가 경로 사용). |
+| `worker/quiz/bank.ts` | 기본 예시 세트(서버 전용). `src/` 에서 import 하지 않는다. |
 | `src/` | 참가자(`/`), 진행자(`/host`), 전광판(`/board`) 한 개의 SPA. |
 
 ## 2. 공식 문서에서 확인한 제한·요금과 설계에 미친 영향

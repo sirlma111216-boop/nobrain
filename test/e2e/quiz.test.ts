@@ -469,18 +469,78 @@ describe('다음 문제·종료·초기화', () => {
   });
 });
 
-describe('문제세트', () => {
-  it('세트 목록에는 정답이 없고, 고른 세트로 행사가 만들어진다', async () => {
+// 1x1 PNG
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+
+describe('문제세트 만들기', () => {
+  it('사진을 올려 세트를 만들고, 행사에는 그 순간의 복사본이 고정된다', async () => {
     const h2 = await hostLogin(base, password);
-    const list = await h2.get('/api/host/sets');
-    expect(list.status).toBe(200);
-    expect(list.data.map((x: any) => x.id)).toEqual(expect.arrayContaining(['basic', 'set1']));
-    expect(Object.keys(list.data[0]).sort()).toEqual(['count', 'id', 'title']);
-    expect((await h2.post('/api/host/events', { title: 'x', set: 'nope' })).status).toBe(400);
-    const ev = await Host.create(h2, '세트1 행사', 'set1');
+    // 사진 올리기(이진 본문)
+    const up = await fetch(base + '/api/host/media', { method: 'POST', headers: { cookie: h2.cookieHeader(), origin: base, 'x-quiz': '1', 'content-type': 'image/png' }, body: PNG });
+    expect(up.status).toBe(200);
+    const { id: imageId, url } = (await up.json()) as { id: string; url: string };
+    expect(imageId).toMatch(/^[a-f0-9]{32}$/);
+    const img = await fetch(base + url); // 공개 주소(전광판용)
+    expect(img.status).toBe(200);
+    expect(img.headers.get('content-type')).toBe('image/png');
+    expect((await fetch(base + '/api/host/media', { method: 'POST', headers: { cookie: h2.cookieHeader(), origin: base, 'x-quiz': '1', 'content-type': 'text/html' }, body: '<b>x</b>' })).status).toBe(415);
+
+    const cs = await h2.post('/api/host/sets', { title: '사진 퀴즈 시험' });
+    expect(cs.status).toBe(200);
+    const sid = cs.data.id;
+    expect((await h2.post('/api/host/events', { title: 'x', set: sid })).status).toBe(400); // 빈 세트로는 행사 불가
+    const q1 = await h2.post(`/api/host/sets/${sid}/questions`, { imageId, answerDisplay: '엄마손파이', accepted: ['엄마 손 파이'], timeLimitSec: 15 });
+    expect(q1.status).toBe(200);
+    expect(q1.data.question.prompt).toBe('');
+    const q2 = await h2.post(`/api/host/sets/${sid}/questions`, { imageId, answerDisplay: '초코파이', prompt: '이 과자는?' });
+    expect((await h2.post(`/api/host/sets/${sid}/questions`, { imageId: 'b'.repeat(32), answerDisplay: 'x' })).status).toBe(400); // 없는 사진
+    // 순서 바꾸기
+    await h2.post(`/api/host/sets/${sid}/order`, { qids: [q2.data.question.id, q1.data.question.id] });
+    let set = (await h2.get(`/api/host/sets/${sid}`)).data;
+    expect(set.questions.map((q: any) => q.answerDisplay)).toEqual(['초코파이', '엄마손파이']);
+    expect(set.editable).toBe(true);
+    const list = (await h2.get('/api/host/sets')).data;
+    expect(list.find((x: any) => x.id === sid)).toMatchObject({ count: 2, editable: true });
+
+    // 행사 생성 → 세트를 고쳐도 행사는 그대로
+    const ev = await Host.create(h2, '사진 퀴즈 행사', sid);
+    await h2.post(`/api/host/sets/${sid}/questions/${q2.data.question.id}`, { imageId, answerDisplay: '몽쉘' });
+    await ev.mustCmd('next');
     await ev.refresh();
-    expect(ev.view.qTotal).toBe(20);
-    expect((await new Http(base).get('/api/host/sets')).status).toBe(401);
+    expect(ev.view.qTotal).toBe(2);
+    expect(ev.view.question.answerDisplay).toBe('초코파이');
+    set = (await h2.get(`/api/host/sets/${sid}`)).data;
+    expect(set.questions[0].answerDisplay).toBe('몽쉘');
+
+    // 행사에서 사진 문제 채점(질문 글 없음)
+    await ev.genCodes(1, 'student');
+    const [c] = await ev.codes();
+    const p1 = new Bot(base);
+    await p1.join(ev.event, c.code);
+    await p1.connect();
+    await ev.mustCmd('start');
+    await p1.waitFor((b: Bot) => b.view?.phase === 'open');
+    expect((await p1.submit(' 초코 파이 ')).data.status).toBe('accepted');
+    await ev.mustCmd('close');
+    expect((await ev.results()).runs[0]).toMatchObject({ total: 1, correct: 1 });
+    p1.disconnect();
+
+    // 혼자 풀기 채점
+    const chk = await h2.post('/api/host/check', { set: sid, qid: q1.data.question.id, text: '엄마 손 파이' });
+    expect(chk.data).toMatchObject({ correct: true, answerDisplay: '엄마손파이' });
+    expect((await h2.post('/api/host/check', { set: sid, qid: q1.data.question.id, text: '빼빼로' })).data.correct).toBe(false);
+
+    // 권한: 기본 세트는 수정 불가, 학생·비로그인은 세트·사진 API 불가
+    expect((await h2.post('/api/host/sets/basic/questions', { imageId, answerDisplay: 'x' })).status).toBe(403);
+    const anon = new Http(base);
+    expect((await anon.get('/api/host/sets')).status).toBe(401);
+    expect((await anon.get(`/api/host/sets/${sid}`)).status).toBe(401);
+    expect((await fetch(base + '/api/host/media', { method: 'POST', headers: { origin: base, 'x-quiz': '1', 'content-type': 'image/png' }, body: PNG })).status).toBe(401);
+    expect((await fetch(base + '/api/host/media', { method: 'POST', headers: { cookie: h2.cookieHeader(), 'x-quiz': '1', 'content-type': 'image/png' }, body: PNG })).status).toBe(403); // Origin 없음
+
+    // 세트 삭제
+    expect((await h2.post(`/api/host/sets/${sid}/delete`, {})).status).toBe(200);
+    expect((await h2.get(`/api/host/sets/${sid}`)).status).toBe(404);
   });
 });
 

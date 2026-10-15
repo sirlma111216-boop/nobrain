@@ -10,7 +10,7 @@
 // "접수 완료" 응답은 영구 저장 이후에만 클라이언트에 도착한다.
 
 import { DurableObject } from 'cloudflare:workers';
-import { QUESTION_BY_ID, type Question } from './quiz/bank';
+import { QUESTION_BY_ID as STATIC_QUESTIONS, type Question } from './quiz/bank';
 import { acceptedKeys, cleanAnswer, normKey } from './quiz/grading';
 import {
   LIMITS,
@@ -161,6 +161,8 @@ export class EventDO extends DurableObject<Env> {
   private top: { run: number; list: TopAnswer[] } | null = null;
   private readonly boot = crypto.randomUUID().slice(0, 8);
   private genCache = new Map<number, number>();
+  /** 행사를 만들 때 복사해 둔 문제(세트를 나중에 고쳐도 이 행사는 바뀌지 않는다) */
+  private qs = new Map<string, Question>();
   private buckets = new Map<number, { tokens: number; at: number }>();
   private joinFails = new Map<string, number[]>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -191,6 +193,8 @@ export class EventDO extends DurableObject<Env> {
   private load() {
     const raw = this.sql.exec<{ v: string }>(`SELECT v FROM meta WHERE k='state'`).toArray()[0]?.v;
     this.st = raw ? (JSON.parse(raw) as EvState) : null;
+    const qraw = this.sql.exec<{ v: string }>(`SELECT v FROM meta WHERE k='questions'`).toArray()[0]?.v;
+    this.qs = new Map(qraw ? (JSON.parse(qraw) as Question[]).map((q) => [q.id, q]) : []);
     this.registered = this.sql.exec<{ c: number }>(`SELECT COUNT(*) AS c FROM participants`).one().c;
     this.round = this.st && this.st.run ? this.loadRound(this.st.run) : null;
     this.submitted = this.round
@@ -206,10 +210,15 @@ export class EventDO extends DurableObject<Env> {
     this.sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('state', ?)`, JSON.stringify(this.st));
   }
 
+  /** 이 행사의 문제. 복사본이 없는 옛 행사는 코드의 기본 세트에서 찾는다 */
+  private qById(id: string): Question | undefined {
+    return this.qs.get(id) ?? STATIC_QUESTIONS.get(id);
+  }
+
   private q(): Question | null {
     const st = this.st;
     if (!st || st.idx < 0 || st.idx >= st.qids.length) return null;
-    return QUESTION_BY_ID.get(st.qids[st.idx]) ?? null;
+    return this.qById(st.qids[st.idx]) ?? null;
   }
 
   private qNo(): number {
@@ -225,9 +234,12 @@ export class EventDO extends DurableObject<Env> {
   }
 
   // ───────────── 행사 생성 ─────────────
-  init(code: string, title: string, qids: string[]): { ok: boolean; error?: string } {
+  init(code: string, title: string, questions: Question[]): { ok: boolean; error?: string } {
     if (this.st) return { ok: false, error: 'EXISTS' };
-    for (const id of qids) if (!QUESTION_BY_ID.has(id)) return { ok: false, error: 'BAD_QID' };
+    if (!questions.length || questions.length > 300) return { ok: false, error: 'BAD_SET' };
+    const qids = questions.map((q) => q.id);
+    this.sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('questions', ?)`, JSON.stringify(questions));
+    this.qs = new Map(questions.map((q) => [q.id, q]));
     this.st = {
       code,
       title,
@@ -245,6 +257,15 @@ export class EventDO extends DurableObject<Env> {
     };
     this.saveState();
     return { ok: true };
+  }
+
+  /** 연습용 봇이 답을 고를 때 쓰는 정답·오답 예시 */
+  questionsForBots(): { id: string; accepted: string[]; decoys: string[] }[] {
+    if (!this.st) return [];
+    return this.st.qids.map((id) => {
+      const q = this.qById(id);
+      return { id, accepted: q?.accepted ?? [], decoys: q?.decoys ?? [] };
+    });
   }
 
   exists(): { exists: boolean; title?: string } {
@@ -456,7 +477,7 @@ export class EventDO extends DurableObject<Env> {
     if (!text) return { status: 'invalid', message: '답을 입력하세요.' };
     if ([...text].length > LIMITS.answerMaxChars) return { status: 'invalid', message: `답은 ${LIMITS.answerMaxChars}자 이내로 입력하세요.` };
 
-    const q = QUESTION_BY_ID.get(r.qid)!;
+    const q = this.qById(r.qid)!;
     const norm = normKey(text, q.rules);
     const now = Date.now();
     const ex = this.sql
@@ -526,7 +547,7 @@ export class EventDO extends DurableObject<Env> {
   private gradeRun(run: number) {
     const r = this.loadRound(run);
     if (!r) return;
-    const q = QUESTION_BY_ID.get(r.qid)!;
+    const q = this.qById(r.qid)!;
     const extra = JSON.parse(r.extra_json) as string[];
     const keys = acceptedKeys([...q.accepted, ...extra], q.rules);
     this.sql.exec(`DELETE FROM results WHERE run=?`, run);
@@ -551,7 +572,7 @@ export class EventDO extends DurableObject<Env> {
     if (this.top && this.top.run === run) return this.top.list;
     const r = this.loadRound(run);
     if (!r) return [];
-    const q = QUESTION_BY_ID.get(r.qid)!;
+    const q = this.qById(r.qid)!;
     const keys = new Set(acceptedKeys([...q.accepted, ...(JSON.parse(r.extra_json) as string[])], q.rules));
     const list = this.sql
       .exec<{ norm: string; c: number }>(
@@ -706,7 +727,7 @@ export class EventDO extends DurableObject<Env> {
         const run = Number(a.run) || this.round?.run || 0;
         const r = this.loadRound(run);
         if (!r) return fail('해당 문제 진행 기록이 없습니다.');
-        const q = QUESTION_BY_ID.get(r.qid)!;
+        const q = this.qById(r.qid)!;
         const text = typeof a.text === 'string' ? cleanAnswer(a.text) : '';
         if (!text || [...text].length > LIMITS.answerMaxChars) return fail('인정할 답을 입력하세요.');
         const key = normKey(text, q.rules);
@@ -839,7 +860,7 @@ export class EventDO extends DurableObject<Env> {
         closedAt: r.closed_at,
         total: r.total,
         correct: r.correct,
-        answerDisplay: QUESTION_BY_ID.get(r.qid)?.answerDisplay ?? '',
+        answerDisplay: this.qById(r.qid)?.answerDisplay ?? '',
         extra: JSON.parse(r.extra_json) as string[],
       })),
       rows: people.map((p) => {
@@ -890,7 +911,7 @@ export class EventDO extends DurableObject<Env> {
     };
     // 공개 단계에 해당하는 정보만 담는다. 정답·집계는 해당 단계 전에는 전광판에도 보내지 않는다.
     if (r && (st.phase === 'open' || st.phase === 'closed')) {
-      const q = QUESTION_BY_ID.get(r.qid)!;
+      const q = this.qById(r.qid)!;
       v.question = { prompt: q.prompt, image: q.image, imageAlt: q.imageAlt };
       if (st.phase === 'closed') {
         if (st.stage === 3) {
@@ -938,7 +959,7 @@ export class EventDO extends DurableObject<Env> {
       )
       .toArray()
       .map((x) => ({ run: x.run, qNo: x.idx + 1, qid: x.qid, status: x.status, total: x.total, correct: x.correct, voided: !!x.voided }));
-    const nq = st.idx + 1 < st.qids.length ? QUESTION_BY_ID.get(st.qids[st.idx + 1]) : null;
+    const nq = st.idx + 1 < st.qids.length ? this.qById(st.qids[st.idx + 1]) : null;
     const v: HostView = {
       t: 'host',
       ev: st.code,

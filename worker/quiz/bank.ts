@@ -6,8 +6,6 @@
 // 이미지는 public/media/ 에 두되 파일 이름에 정답을 드러내지 않는다.
 
 import type { GradingRules } from './grading';
-import { SET1 } from './sets/set1';
-import { IMPORTED_SETS } from './sets/imported';
 
 export interface Question {
   /** 고유 ID. 한 번 쓴 ID 는 내용을 바꿀 때도 새 ID 로 바꾸는 것을 권장 */
@@ -73,11 +71,9 @@ export interface QuestionSet {
   questions: Question[];
 }
 
-/** 행사를 만들 때 고를 수 있는 문제세트. 순서 = 진행자 화면 목록 순서 */
+/** 코드에 들어 있는 기본 세트(수정 불가). 진행자가 화면에서 만드는 세트는 LibraryDO 에 저장된다(worker/library-do.ts). */
 export const QUESTION_SETS: QuestionSet[] = [
-  { id: 'basic', title: '시험 문제 3개', questions: QUESTIONS },
-  SET1,
-  ...IMPORTED_SETS,
+  { id: 'basic', title: '시험 문제 3개 (기본 예시)', questions: QUESTIONS },
 ];
 
 export const ALL_QUESTIONS: Question[] = QUESTION_SETS.flatMap((s) => s.questions);

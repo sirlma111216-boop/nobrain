@@ -17,14 +17,16 @@
   "durable_objects": {
     "bindings": [
       { "name": "EVENTS", "class_name": "EventDO" },
-      { "name": "BOTS", "class_name": "BotsDO" }
+      { "name": "BOTS", "class_name": "BotsDO" },
+      { "name": "LIBRARY", "class_name": "LibraryDO" }
     ]
   },
   // 연습용 봇이 실제 참가 경로로 요청하도록 자기 자신을 가리키는 서비스 바인딩
   "services": [{ "binding": "SELF", "service": "nobrain-quiz-local" }],
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["EventDO"] },
-    { "tag": "v2", "new_sqlite_classes": ["BotsDO"] }
+    { "tag": "v2", "new_sqlite_classes": ["BotsDO"] },
+    { "tag": "v3", "new_sqlite_classes": ["LibraryDO"] }
   ],
   "observability": { "enabled": true },
   "vars": {
@@ -45,7 +47,8 @@
       "durable_objects": {
         "bindings": [
           { "name": "EVENTS", "class_name": "EventDO" },
-          { "name": "BOTS", "class_name": "BotsDO" }
+          { "name": "BOTS", "class_name": "BotsDO" },
+          { "name": "LIBRARY", "class_name": "LibraryDO" }
         ]
       },
       "services": [{ "binding": "SELF", "service": "nobrain-festival-quiz-test" }],

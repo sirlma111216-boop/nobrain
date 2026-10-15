@@ -3,6 +3,9 @@
 // 행사 Durable Object 에는 검증된 참가자 ID 와 최소한의 일만 넘긴다.
 
 import { QUESTION_SETS, SET_BY_ID } from './quiz/bank';
+import { validateQuestion } from './quiz/validate';
+import { LibraryDO, MAX_MEDIA_BYTES } from './library-do';
+import { cleanAnswer, isCorrect, normKey } from './quiz/grading';
 import { EventDO, type SubmitBody } from './event-do';
 import { BotsDO } from './bots-do';
 import {
@@ -26,7 +29,13 @@ import {
   type PlayerToken,
 } from './auth';
 
-export { EventDO, BotsDO };
+export { EventDO, BotsDO, LibraryDO };
+
+const MEDIA_TYPES = new Set(['image/webp', 'image/jpeg', 'image/png', 'image/gif']);
+
+function libraryStub(env: Env): DurableObjectStub<LibraryDO> {
+  return env.LIBRARY.get(env.LIBRARY.idFromName('library')) as DurableObjectStub<LibraryDO>;
+}
 
 const MAX_BOTS = 200;
 
@@ -98,6 +107,8 @@ function checkMutation(req: Request, env: Env) {
   const origin = req.headers.get('Origin');
   if (!origin || !allowedOrigins(req, env).has(origin)) throw new HttpError(403, 'ORIGIN', '허용되지 않은 출처의 요청입니다.');
   if (req.headers.get('x-quiz') !== '1') throw new HttpError(403, 'CSRF', '잘못된 요청입니다.');
+  // 사진 올리기만 이진 본문을 받는다(그 경로에서 형식을 따로 검사)
+  if (new URL(req.url).pathname === '/api/host/media') return;
   if (!(req.headers.get('content-type') ?? '').startsWith('application/json')) throw new HttpError(415, 'TYPE', '잘못된 요청 형식입니다.');
 }
 
@@ -201,6 +212,16 @@ async function route(req: Request, env: Env): Promise<Response> {
   }
 
   if (!path.startsWith('/api/')) return env.ASSETS.fetch(req);
+
+  // 문제 사진(진행자가 올린 것). ID 가 내용 해시라 바뀌지 않으므로 오래 캐시한다.
+  const media = path.match(/^\/api\/media\/([a-f0-9]{32})$/);
+  if (media && method === 'GET') {
+    const m = await libraryStub(env).getMedia(media[1]);
+    if (!m) return json({ error: 'NOT_FOUND', message: '사진을 찾을 수 없습니다.' }, 404);
+    return new Response(m.data, {
+      headers: { 'content-type': m.type, 'cache-control': 'public, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' },
+    });
+  }
   if (method === 'POST') checkMutation(req, env);
 
   // ───────── 참가자 ─────────
@@ -294,19 +315,112 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (path.startsWith('/api/host/')) {
     await requireHost(req, env);
 
-    // 문제세트 목록(제목·문항 수만. 정답은 보내지 않음)
+    // ───── 문제세트: 코드의 기본 세트(수정 불가) + 진행자가 만든 세트(LibraryDO) ─────
+    const lib = libraryStub(env);
+    const findSet = async (id: string) => {
+      const s = SET_BY_ID.get(id);
+      if (s) return { id: s.id, title: s.title, questions: s.questions, editable: false };
+      if (!/^lib-[a-z0-9]{1,20}$/.test(id)) return null;
+      const l = await lib.getSet(id);
+      return l ? { ...l, editable: true } : null;
+    };
+    const setTitle = (v: unknown) => (typeof v === 'string' ? v : '').replace(/[\p{Cc}<>]/gu, '').trim().slice(0, 40);
+
+    // 목록(제목·문항 수만)
     if (path === '/api/host/sets' && method === 'GET') {
-      return json(QUESTION_SETS.map((s) => ({ id: s.id, title: s.title, count: s.questions.length })));
+      const builtIn = QUESTION_SETS.map((s) => ({ id: s.id, title: s.title, count: s.questions.length, editable: false }));
+      const mine = (await lib.listSets()).map((s) => ({ id: s.id, title: s.title, count: s.count, editable: true }));
+      return json([...mine, ...builtIn]);
+    }
+    // 새 세트
+    if (path === '/api/host/sets' && method === 'POST') {
+      const b = await readJson(req);
+      const title = setTitle(b.title);
+      if (!title) throw new HttpError(400, 'TITLE', '세트 이름을 입력하세요.');
+      const r = await lib.createSet(title);
+      if (!r.ok) throw new HttpError(400, 'LIMIT', r.message);
+      return json({ ok: true, id: r.id });
+    }
+
+    const setPath = path.match(/^\/api\/host\/sets\/([a-z0-9-]{1,40})(?:\/(delete|order|questions)(?:\/([a-z0-9-]{1,40})(?:\/(delete))?)?)?$/);
+    if (setPath) {
+      const [, sid, sub, qid, qsub] = setPath;
+      // 상세(진행자 전용: 정답·인정 답안·해설 포함)
+      if (!sub && method === 'GET') {
+        const set = await findSet(sid);
+        if (!set) throw new HttpError(404, 'SET', '없는 문제세트입니다.');
+        return json(set);
+      }
+      if (method !== 'POST') throw new HttpError(405, 'METHOD', '잘못된 요청입니다.');
+      if (!sid.startsWith('lib-')) throw new HttpError(403, 'READONLY', '기본 세트는 고칠 수 없습니다. 새 세트를 만드세요.');
+      const b = await readJson(req);
+      if (!sub) {
+        const title = setTitle(b.title);
+        if (!title) throw new HttpError(400, 'TITLE', '세트 이름을 입력하세요.');
+        if (!(await lib.renameSet(sid, title))) throw new HttpError(404, 'SET', '없는 문제세트입니다.');
+        return json({ ok: true });
+      }
+      if (sub === 'delete') {
+        if (!(await lib.deleteSet(sid))) throw new HttpError(404, 'SET', '없는 문제세트입니다.');
+        return json({ ok: true });
+      }
+      if (sub === 'order') {
+        const qids = Array.isArray(b.qids) ? b.qids.filter((x): x is string => typeof x === 'string') : [];
+        if (!(await lib.reorder(sid, qids))) throw new HttpError(404, 'SET', '없는 문제세트입니다.');
+        return json({ ok: true });
+      }
+      if (sub === 'questions' && qsub === 'delete' && qid) {
+        if (!(await lib.deleteQuestion(sid, qid))) throw new HttpError(404, 'QID', '문제를 찾을 수 없습니다.');
+        return json({ ok: true });
+      }
+      if (sub === 'questions' && !qsub) {
+        const v = validateQuestion(b);
+        if (!v.ok) throw new HttpError(400, 'INVALID', v.message);
+        const r = await lib.saveQuestion(sid, qid ?? null, v.q);
+        if (!r.ok) throw new HttpError(400, 'SAVE', r.message);
+        return json({ ok: true, question: r.question });
+      }
+      throw new HttpError(404, 'NOT_FOUND', '없는 주소입니다.');
+    }
+
+    // 사진 올리기(이진 본문). 화면에서 미리 줄인 WebP/JPEG/PNG/GIF
+    if (path === '/api/host/media' && method === 'POST') {
+      const type = (req.headers.get('content-type') ?? '').split(';')[0].trim();
+      if (!MEDIA_TYPES.has(type)) throw new HttpError(415, 'TYPE', '사진 형식은 WebP·JPEG·PNG·GIF 만 됩니다.');
+      if (Number(req.headers.get('content-length') ?? '0') > MAX_MEDIA_BYTES) throw new HttpError(413, 'TOO_LARGE', '사진이 너무 큽니다(1.9MB 이하).');
+      const buf = await req.arrayBuffer();
+      if (buf.byteLength === 0 || buf.byteLength > MAX_MEDIA_BYTES) throw new HttpError(413, 'TOO_LARGE', '사진이 너무 큽니다(1.9MB 이하).');
+      const r = await lib.putMedia(buf, type);
+      if (!r.ok) throw new HttpError(400, 'MEDIA', r.message);
+      return json({ ok: true, id: r.id, url: `/api/media/${r.id}` });
+    }
+
+    // 혼자 풀기 채점: 행사와 같은 서버 채점 규칙(정규화 + 인정 답안 정확 일치). 저장하지 않는다.
+    if (path === '/api/host/check' && method === 'POST') {
+      const b = await readJson(req);
+      const set = typeof b.set === 'string' ? await findSet(b.set) : null;
+      const q = set?.questions.find((x) => x.id === b.qid);
+      if (!q) throw new HttpError(404, 'QID', '없는 문제입니다.');
+      const text = typeof b.text === 'string' ? b.text.slice(0, 100) : '';
+      return json({
+        correct: isCorrect(text, q.accepted, q.rules),
+        text: cleanAnswer(text),
+        norm: normKey(text, q.rules),
+        answerDisplay: q.answerDisplay,
+        explanation: q.explanation,
+      });
     }
 
     if (path === '/api/host/events' && method === 'POST') {
       const b = await readJson(req);
-      const set = SET_BY_ID.get(typeof b.set === 'string' ? b.set : 'basic');
+      const set = await findSet(typeof b.set === 'string' ? b.set : 'basic');
       if (!set) throw new HttpError(400, 'SET', '없는 문제세트입니다.');
-      const title = (typeof b.title === 'string' ? b.title : '').replace(/[\p{Cc}<>]/gu, '').trim().slice(0, 40) || '축제 퀴즈';
+      if (!set.questions.length) throw new HttpError(400, 'EMPTY', '문제가 없는 세트입니다. 문제를 먼저 넣으세요.');
+      const title = setTitle(b.title) || '축제 퀴즈';
       for (let i = 0; i < 5; i++) {
         const code = randomCode(EVENT_CODE_LEN);
-        const r = await eventStub(env, code).init(code, title, set.questions.map((q) => q.id));
+        // 세트의 지금 내용을 행사에 복사한다(이후 세트를 고쳐도 이 행사는 그대로)
+        const r = await eventStub(env, code).init(code, title, set.questions);
         if (r.ok) return json({ ok: true, event: code });
       }
       throw new HttpError(500, 'CREATE', '행사를 만들지 못했습니다. 다시 시도하세요.');
@@ -373,7 +487,7 @@ async function route(req: Request, env: Env): Promise<Response> {
         await bots.stop(); // 이전 봇 정지
         await stub.removeBots(); // 남아 있던 봇 자료 정리
         const made = await createCodes(env, stub, ev, count, 'bot');
-        const status = await bots.start(ev, url.origin, made);
+        const status = await bots.start(ev, url.origin, made, await stub.questionsForBots());
         return json({ ok: true, status });
       }
       throw new HttpError(400, 'ACTION', '잘못된 요청입니다.');

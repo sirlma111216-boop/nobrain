@@ -162,6 +162,9 @@ body[data-page='board'] { background: #000; overflow: hidden; }
 .b-qbody { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.5em; min-height: 0; }
 .b-img { max-width: 70%; max-height: 62%; min-height: 0; object-fit: contain; background: #fff; border-radius: 1.2em; padding: 1em; }
 .b-img.small { max-width: 38%; max-height: 80%; }
+/* 문제 공개 화면: 사진이 남는 공간을 채우되 비율 유지(넘치지 않게) */
+.b-qbody .b-img { flex: 1 1 0; min-height: 0; width: 100%; max-width: 100%; max-height: none; object-fit: contain; background: transparent; padding: 0; border-radius: .6em; }
+.b-split .b-img.small { max-height: 100%; min-width: 0; }
 .b-prompt { font-size: 5.6em; font-weight: 900; text-align: center; }
 .b-stamp { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-8deg); font-size: 7em; font-weight: 900; color: #ff6b7f; border: .12em solid #ff6b7f; padding: .1em .5em; border-radius: .2em; background: rgba(20, 26, 51, .8); }
 .b-foot { text-align: center; font-size: 1.8em; color: #9ea6d9; font-family: ui-monospace, Consolas, monospace; }
@@ -185,3 +188,56 @@ body[data-page='board'] { background: #000; overflow: hidden; }
 .b-conn { position: absolute; right: 1em; bottom: 1em; font-size: 1.6em; background: #b35c00; padding: .3em .8em; border-radius: .5em; }
 .b-full { position: fixed; right: 12px; top: 12px; padding: 8px 14px; border-radius: 8px; border: 1px solid #555; background: rgba(0, 0, 0, .6); color: #fff; opacity: .5; }
 .b-full:hover { opacity: 1; }
+
+/* ───────── 문제세트 보기 · 혼자 풀기 (진행자) ───────── */
+.s-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.s-tabs small { font-weight: 400; opacity: .8; }
+.s-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.s-card { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; }
+.s-card img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #fff; border-bottom: 1px solid var(--line); }
+.s-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+.s-no { font-size: 12px; color: var(--muted); }
+.s-prompt { font-weight: 800; font-size: 16px; }
+.s-ans { font-size: 15px; }
+.s-ans b { color: var(--ok); }
+.s-meta { font-size: 13px; color: var(--muted); }
+.s-exp { font-size: 13px; line-height: 1.5; }
+.solo { min-height: 100dvh; display: flex; flex-direction: column; background: var(--bg); }
+.solo-top { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.solo-progress { flex: 1; display: flex; align-items: center; gap: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.solo-bar { flex: 1; height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; }
+.solo-bar div { height: 100%; background: var(--brand); transition: width .3s; }
+.solo-timer { min-width: 4em; text-align: right; font-size: 22px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.solo-timer.hurry { color: var(--err); }
+.solo-main { flex: 1; width: 100%; max-width: 760px; margin: 0 auto; padding: 8px 16px 24px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.solo-img { width: 100%; max-height: 46vh; object-fit: contain; background: #fff; border-radius: 16px; border: 1px solid var(--line); }
+.solo-prompt { font-size: clamp(22px, 4vw, 32px); font-weight: 900; text-align: center; }
+.solo-input { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 10px; }
+.solo-input .h-actions { justify-content: center; }
+.solo-result { width: 100%; max-width: 480px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; border-radius: 16px; text-align: center; }
+.solo-result.ok { background: var(--ok-bg); }
+.solo-result.no { background: var(--err-bg); }
+.solo-verdict { font-size: 32px; font-weight: 900; }
+.solo-result.ok .solo-verdict { color: var(--ok); }
+.solo-result.no .solo-verdict { color: var(--err); }
+.solo-answer { font-size: 20px; }
+.solo-score { font-size: 64px; font-weight: 900; text-align: center; font-variant-numeric: tabular-nums; }
+.solo-score small { font-size: 28px; color: var(--muted); }
+.solo-wrong { display: flex; gap: 12px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 8px; background: var(--surface); }
+.solo-wrong img { width: 120px; aspect-ratio: 16 / 9; object-fit: contain; background: #fff; border-radius: 8px; }
+
+/* 문제 편집 */
+.q-editor { display: grid; grid-template-columns: minmax(220px, 360px) 1fr; gap: 16px; align-items: start; }
+@media (max-width: 720px) { .q-editor { grid-template-columns: 1fr; } }
+.q-drop { aspect-ratio: 4 / 3; border: 2px dashed var(--line); border-radius: 14px; display: grid; place-items: center; text-align: center; color: var(--muted); cursor: pointer; background: var(--bg); overflow: hidden; }
+.q-drop.over { border-color: var(--brand); background: var(--ok-bg); }
+.q-drop img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.q-fields { display: flex; flex-direction: column; gap: 10px; }
+.q-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 700; }
+.q-fields label.h-check { flex-direction: row; align-items: center; font-weight: 400; }
+.q-fields textarea { resize: vertical; font: inherit; }
+.q-fields details { display: flex; flex-direction: column; gap: 8px; }
+.q-fields summary { cursor: pointer; color: var(--muted); font-size: 14px; margin-bottom: 6px; }
+.h-input.tiny, .h-row .h-input.tiny { flex: 0 0 auto; width: 80px; min-width: 0; }
+.s-tools { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.s-card.editing { outline: 3px solid var(--brand); }

@@ -1,6 +1,6 @@
 # 축제 실시간 단답형 퀴즈 — 시험 버전
 
-문제세트: **시험 문제 3개**, **문제세트 1(리허설 20문항, 직접 그린 그림)**, 그리고 CSV+사진으로 가져온 세트. 행사를 만들 때 고릅니다.
+문제는 **진행자 화면에서 직접 만듭니다**(사진 올리기 + 정답·인정 답안). 행사를 만들 때 세트를 고르면 그 순간의 내용이 행사에 고정됩니다. → [docs/ADD_QUESTIONS.md](docs/ADD_QUESTIONS.md)
 
 학교 축제에서 학생·교사 약 500명이 각자 휴대폰(LTE·5G)으로 QR/URL 접속해 참여하는 실시간 단답형 퀴즈입니다.
 문제는 무대 전광판에만 나오고, 휴대폰에는 문제 번호·남은 시간·입력 칸·제출 버튼·접수 상태만 나옵니다.
@@ -13,6 +13,7 @@
 |---|---|---|
 | 참가자(휴대폰) | `/` (QR: `/?e=행사코드`) | 행사 코드 + 개인 참가 코드 |
 | 진행자 | `/host` | 진행자 비밀번호 (Wrangler secret) |
+| 문제세트 만들기 · 혼자 풀기 | `/host/sets` | 진행자 비밀번호 |
 | 전광판(16:9) | `/board` | 진행자가 발급한 전광판 링크(읽기 전용) |
 
 ## 교사 혼자 리허설하기 — 연습용 봇
@@ -53,7 +54,6 @@ npm run dev
 | `node tools/codes.mjs --students 480 --teachers 20` | 새 행사 + 참가 코드 500개 생성 → `private/codes-*.csv` |
 | `node tools/codes.mjs --load 1000 --title 부하시험` | 부하 시험용 참가자 1,000명 준비 |
 | `node loadtest/run.mjs --n 500` | 부하 시험 (실제 입장·WebSocket·답안 API 사용) |
-| `node tools/import-set.mjs --dir quiz-sets/festival --id festival --title "축제"` | 사진 + CSV 폴더로 새 문제세트 만들기 ([docs/ADD_QUESTIONS.md](docs/ADD_QUESTIONS.md)) |
 | `npm run deploy:test` | 시험용 Worker(`nobrain-festival-quiz-test`) 배포 |
 
 ## 문서

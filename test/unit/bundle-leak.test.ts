@@ -34,7 +34,7 @@ describe('정적 파일 정답 유출 검사', () => {
   });
 
   it('서버 전용 모듈 이름이 번들에 없다', () => {
-    expect(all).not.toContain('answerDisplay:');
+    // (진행자 편집 화면에 필드 이름 answerDisplay 가 있는 것은 정상 — 정답 값이 아님)
     expect(all).not.toContain('QUESTION_BY_ID');
   });
 });

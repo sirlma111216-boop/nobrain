@@ -63,6 +63,26 @@ describe('문제세트', () => {
         for (const d of q.decoys ?? []) expect(ok2(d, q.accepted, q.rules), q.id + ' 오답예시가 정답으로 채점됨: ' + d).toBe(false);
       }
     }
-    expect(QUESTION_SETS.find((x) => x.id === 'set1')?.questions.length).toBe(20);
+  });
+});
+
+import { validateQuestion } from '../../worker/quiz/validate';
+describe('문제 입력 검증', () => {
+  const base = { imageId: 'a'.repeat(32), answerDisplay: ' 엄마손파이 ', accepted: ['엄마 손 파이', '엄마손파이', ''], timeLimitSec: 20 };
+  it('대표 정답을 인정 답안에 넣고, 정답으로 채점되는 오답 예시는 뺀다', () => {
+    const v = validateQuestion({ ...base, decoys: ['엄마 손파이', '초코파이'] });
+    expect(v.ok).toBe(true);
+    if (!v.ok) return;
+    expect(v.q.answerDisplay).toBe('엄마손파이');
+    expect(v.q.accepted).toEqual(['엄마손파이', '엄마 손 파이']);
+    expect(v.q.decoys).toEqual(['초코파이']);
+    expect(v.q.prompt).toBe('');
+    expect(v.q.rules).toEqual({ ignoreSpaces: true, caseInsensitive: true });
+  });
+  it('사진·정답·제한시간 오류를 거부한다', () => {
+    expect(validateQuestion({ ...base, imageId: 'x' }).ok).toBe(false);
+    expect(validateQuestion({ ...base, answerDisplay: '  ' }).ok).toBe(false);
+    expect(validateQuestion({ ...base, answerDisplay: '가'.repeat(31) }).ok).toBe(false);
+    expect(validateQuestion({ ...base, timeLimitSec: 3 }).ok).toBe(false);
   });
 });

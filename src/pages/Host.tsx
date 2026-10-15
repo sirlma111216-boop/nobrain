@@ -42,7 +42,7 @@ export default function Host() {
   return <Dashboard event={event} devTools={devTools} onBack={() => choose(null)} onAuthLost={() => setAuth('no')} />;
 }
 
-function HostLogin({ onOk }: { onOk: () => void }) {
+export function HostLogin({ onOk }: { onOk: () => void }) {
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -89,10 +89,17 @@ function remember(ev: string) {
 
 function EventPicker({ onPick }: { onPick: (ev: string) => void }) {
   const [title, setTitle] = useState('축제 퀴즈 (시험)');
-  const [sets, setSets] = useState<{ id: string; title: string; count: number }[]>([]);
+  const [sets, setSets] = useState<{ id: string; title: string; count: number; editable: boolean }[]>([]);
   const [setId, setSetId] = useState('basic');
   useEffect(() => {
-    api<{ id: string; title: string; count: number }[]>('/api/host/sets').then(setSets).catch(() => {});
+    api<{ id: string; title: string; count: number; editable: boolean }[]>('/api/host/sets')
+      .then((s) => {
+        setSets(s);
+        // 직접 만든 세트가 있으면 그것을 먼저 고른다
+        const first = s.find((x) => x.editable && x.count > 0);
+        if (first) setSetId(first.id);
+      })
+      .catch(() => {});
   }, []);
   const [code, setCode] = useState('');
   const [err, setErr] = useState('');
@@ -119,12 +126,15 @@ function EventPicker({ onPick }: { onPick: (ev: string) => void }) {
   return (
     <div className="h-wrap narrow">
       <h1>행사 선택</h1>
+      <a className="h-btn" href="/host/sets">📚 문제세트 보기 · 혼자 풀기</a>
       <section className="h-card">
         <h2>새 행사 만들기</h2>
         <input className="h-input" value={title} maxLength={40} onChange={(e) => setTitle(e.target.value)} placeholder="행사 이름" />
         <select className="h-input" value={setId} onChange={(e) => setSetId(e.target.value)} aria-label="문제세트">
           {sets.map((s) => (
-            <option key={s.id} value={s.id}>{s.title} · {s.count}문항</option>
+            <option key={s.id} value={s.id} disabled={s.count === 0}>
+              {s.editable ? '' : '[예시] '}{s.title} · {s.count}문제{s.count === 0 ? ' (비어 있음)' : ''}
+            </option>
           ))}
         </select>
         <p className="h-hint">행사를 만들 때 고른 문제세트가 그 행사에 고정됩니다. 다른 세트로 하려면 새 행사를 만드세요.</p>
@@ -272,6 +282,7 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
     <div className="h-wrap">
       <header className="h-head">
         <button className="h-btn small" onClick={onBack}>← 행사 선택</button>
+        <a className="h-btn small" href="/host/sets" target="_blank" rel="noopener">문제세트 · 혼자 풀기</a>
         <h1>{v.title} <span className="h-code">{v.ev}</span></h1>
         <span className={'h-conn ' + conn}>{conn === 'open' ? '실시간 연결' : '다시 연결 중'}</span>
       </header>
@@ -295,7 +306,7 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
           <div className="h-q">
             <img src={v.question.image} alt="" />
             <div>
-              <div className="h-q-prompt">{v.question.prompt}</div>
+              <div className="h-q-prompt">{v.question.prompt || '(사진 문제)'}</div>
               <div className="h-q-ans">정답: <b>{v.question.answerDisplay}</b> · 인정: {[...v.question.accepted, ...v.question.extra].join(', ')}</div>
               <div className="h-q-meta">
                 제한 {v.question.timeLimitSec}초 · 띄어쓰기 {v.question.rules.ignoreSpaces ? '무시' : '구분'} · 영문 대소문자 {v.question.rules.caseInsensitive ? '무시' : '구분'}
@@ -310,7 +321,7 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
           <B name="close" label="■ 조기 마감" on={ph === 'open'} kind="warn" />
         </div>
         {ph === 'ready' && v.question && <p className="h-hint">시작하면 전광판에 문제가 공개되고 {v.question.timeLimitSec}초 동안 답을 받습니다.</p>}
-        {ph === 'closed' && v.nextQuestion && <p className="h-hint">다음: 문제 {v.nextQuestion.qNo} “{v.nextQuestion.prompt}”</p>}
+        {ph === 'closed' && v.nextQuestion && <p className="h-hint">다음: 문제 {v.nextQuestion.qNo}{v.nextQuestion.prompt ? ` “${v.nextQuestion.prompt}”` : ''}</p>}
       </section>
 
       {ph === 'closed' && (

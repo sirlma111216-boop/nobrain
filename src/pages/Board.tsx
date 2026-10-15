@@ -173,7 +173,7 @@ function Scene({ v, qr, joinUrl, remaining }: { v: BoardView; qr: string; joinUr
         {head}
         <div className="b-qbody">
           {q && <img className="b-img" src={q.image} alt={q.imageAlt} />}
-          <div className="b-prompt">{q?.prompt}</div>
+          {q?.prompt && <div className="b-prompt">{q.prompt}</div>}
         </div>
         {v.phase === 'closed' && <div className="b-stamp">답안 접수 마감</div>}
         <div className="b-foot">{joinUrl.replace(/^https?:\/\//, '')} · 행사 코드 {v.ev}</div>
