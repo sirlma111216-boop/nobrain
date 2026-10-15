@@ -2,7 +2,7 @@
 // 세션 서명 검증·코드 해시·암호화처럼 상태가 필요 없는 CPU 작업은 여기(여러 인스턴스로 분산)에서 하고,
 // 행사 Durable Object 에는 검증된 참가자 ID 와 최소한의 일만 넘긴다.
 
-import { QUESTIONS } from './quiz/bank';
+import { QUESTION_SETS, SET_BY_ID } from './quiz/bank';
 import { EventDO, type SubmitBody } from './event-do';
 import { BotsDO } from './bots-do';
 import {
@@ -294,12 +294,19 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (path.startsWith('/api/host/')) {
     await requireHost(req, env);
 
+    // 문제세트 목록(제목·문항 수만. 정답은 보내지 않음)
+    if (path === '/api/host/sets' && method === 'GET') {
+      return json(QUESTION_SETS.map((s) => ({ id: s.id, title: s.title, count: s.questions.length })));
+    }
+
     if (path === '/api/host/events' && method === 'POST') {
       const b = await readJson(req);
+      const set = SET_BY_ID.get(typeof b.set === 'string' ? b.set : 'basic');
+      if (!set) throw new HttpError(400, 'SET', '없는 문제세트입니다.');
       const title = (typeof b.title === 'string' ? b.title : '').replace(/[\p{Cc}<>]/gu, '').trim().slice(0, 40) || '축제 퀴즈';
       for (let i = 0; i < 5; i++) {
         const code = randomCode(EVENT_CODE_LEN);
-        const r = await eventStub(env, code).init(code, title, QUESTIONS.map((q) => q.id));
+        const r = await eventStub(env, code).init(code, title, set.questions.map((q) => q.id));
         if (r.ok) return json({ ok: true, event: code });
       }
       throw new HttpError(500, 'CREATE', '행사를 만들지 못했습니다. 다시 시도하세요.');

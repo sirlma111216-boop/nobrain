@@ -89,6 +89,11 @@ function remember(ev: string) {
 
 function EventPicker({ onPick }: { onPick: (ev: string) => void }) {
   const [title, setTitle] = useState('축제 퀴즈 (시험)');
+  const [sets, setSets] = useState<{ id: string; title: string; count: number }[]>([]);
+  const [setId, setSetId] = useState('basic');
+  useEffect(() => {
+    api<{ id: string; title: string; count: number }[]>('/api/host/sets').then(setSets).catch(() => {});
+  }, []);
   const [code, setCode] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -96,7 +101,7 @@ function EventPicker({ onPick }: { onPick: (ev: string) => void }) {
     setBusy(true);
     setErr('');
     try {
-      const r = await api<{ event: string }>('/api/host/events', { body: { title } });
+      const r = await api<{ event: string }>('/api/host/events', { body: { title, set: setId } });
       remember(r.event);
       onPick(r.event);
     } catch (e) {
@@ -117,6 +122,12 @@ function EventPicker({ onPick }: { onPick: (ev: string) => void }) {
       <section className="h-card">
         <h2>새 행사 만들기</h2>
         <input className="h-input" value={title} maxLength={40} onChange={(e) => setTitle(e.target.value)} placeholder="행사 이름" />
+        <select className="h-input" value={setId} onChange={(e) => setSetId(e.target.value)} aria-label="문제세트">
+          {sets.map((s) => (
+            <option key={s.id} value={s.id}>{s.title} · {s.count}문항</option>
+          ))}
+        </select>
+        <p className="h-hint">행사를 만들 때 고른 문제세트가 그 행사에 고정됩니다. 다른 세트로 하려면 새 행사를 만드세요.</p>
         <button className="h-btn primary" disabled={busy} onClick={create}>만들기</button>
       </section>
       <section className="h-card">

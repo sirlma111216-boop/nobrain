@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { cleanAnswer, isCorrect, normKey } from '../../worker/quiz/grading';
-import { QUESTIONS } from '../../worker/quiz/bank';
+import { existsSync } from 'node:fs';
+import { QUESTIONS, QUESTION_SETS, ALL_QUESTIONS } from '../../worker/quiz/bank';
+import { isCorrect as ok2 } from '../../worker/quiz/grading';
 
 const loose = { ignoreSpaces: true, caseInsensitive: true };
 const strict = { ignoreSpaces: false, caseInsensitive: false };
@@ -45,5 +47,22 @@ describe('시험 문제 채점', () => {
       expect(q.explanation.length).toBeGreaterThan(5);
       expect(q.image).toMatch(/^\/media\/[a-z0-9]+\.svg$/);
     }
+  });
+});
+
+describe('문제세트', () => {
+  it('세트 ID·문제 ID 가 겹치지 않고, 그림 파일이 있으며, 대표 정답·인정 답안이 채점된다', () => {
+    expect(new Set(QUESTION_SETS.map((x) => x.id)).size).toBe(QUESTION_SETS.length);
+    expect(new Set(ALL_QUESTIONS.map((q) => q.id)).size).toBe(ALL_QUESTIONS.length);
+    for (const set of QUESTION_SETS) {
+      expect(set.questions.length).toBeGreaterThan(0);
+      for (const q of set.questions) {
+        expect(existsSync('public' + q.image), q.id + ' 그림 없음 ' + q.image).toBe(true);
+        expect(q.accepted).toContain(q.answerDisplay);
+        for (const a of q.accepted) expect(ok2(a, q.accepted, q.rules), q.id + ' ' + a).toBe(true);
+        for (const d of q.decoys ?? []) expect(ok2(d, q.accepted, q.rules), q.id + ' 오답예시가 정답으로 채점됨: ' + d).toBe(false);
+      }
+    }
+    expect(QUESTION_SETS.find((x) => x.id === 'set1')?.questions.length).toBe(20);
   });
 });

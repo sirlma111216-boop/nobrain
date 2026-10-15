@@ -6,6 +6,8 @@
 // 이미지는 public/media/ 에 두되 파일 이름에 정답을 드러내지 않는다.
 
 import type { GradingRules } from './grading';
+import { SET1 } from './sets/set1';
+import { IMPORTED_SETS } from './sets/imported';
 
 export interface Question {
   /** 고유 ID. 한 번 쓴 ID 는 내용을 바꿀 때도 새 ID 로 바꾸는 것을 권장 */
@@ -64,4 +66,20 @@ export const QUESTIONS: Question[] = [
   },
 ];
 
-export const QUESTION_BY_ID = new Map(QUESTIONS.map((q) => [q.id, q]));
+export interface QuestionSet {
+  /** 세트 ID (행사를 만들 때 고른다) */
+  id: string;
+  title: string;
+  questions: Question[];
+}
+
+/** 행사를 만들 때 고를 수 있는 문제세트. 순서 = 진행자 화면 목록 순서 */
+export const QUESTION_SETS: QuestionSet[] = [
+  { id: 'basic', title: '시험 문제 3개', questions: QUESTIONS },
+  SET1,
+  ...IMPORTED_SETS,
+];
+
+export const ALL_QUESTIONS: Question[] = QUESTION_SETS.flatMap((s) => s.questions);
+export const QUESTION_BY_ID = new Map(ALL_QUESTIONS.map((q) => [q.id, q]));
+export const SET_BY_ID = new Map(QUESTION_SETS.map((s) => [s.id, s]));

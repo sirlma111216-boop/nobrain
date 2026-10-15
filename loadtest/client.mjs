@@ -107,8 +107,8 @@ export class Host {
     this.event = event;
     this.view = null;
   }
-  static async create(http, title = '자동 시험') {
-    const r = await http.post('/api/host/events', { title });
+  static async create(http, title = '자동 시험', set) {
+    const r = await http.post('/api/host/events', set ? { title, set } : { title });
     if (r.status !== 200) throw new Error('행사 생성 실패 ' + r.status);
     return new Host(http, r.data.event);
   }

@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { execSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { QUESTIONS } from '../../worker/quiz/bank';
+import { ALL_QUESTIONS as QUESTIONS } from '../../worker/quiz/bank';
 
 function files(dir: string): string[] {
   return readdirSync(dir).flatMap((f) => {

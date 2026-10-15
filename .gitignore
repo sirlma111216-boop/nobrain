@@ -13,3 +13,6 @@ loadtest/results/
 *.codes.csv
 *.log
 coverage/
+
+# 문제세트 원본(제작 중인 사진·정답 CSV) — 공개 저장소에 올리지 않는다
+quiz-sets/

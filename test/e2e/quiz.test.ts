@@ -469,6 +469,21 @@ describe('다음 문제·종료·초기화', () => {
   });
 });
 
+describe('문제세트', () => {
+  it('세트 목록에는 정답이 없고, 고른 세트로 행사가 만들어진다', async () => {
+    const h2 = await hostLogin(base, password);
+    const list = await h2.get('/api/host/sets');
+    expect(list.status).toBe(200);
+    expect(list.data.map((x: any) => x.id)).toEqual(expect.arrayContaining(['basic', 'set1']));
+    expect(Object.keys(list.data[0]).sort()).toEqual(['count', 'id', 'title']);
+    expect((await h2.post('/api/host/events', { title: 'x', set: 'nope' })).status).toBe(400);
+    const ev = await Host.create(h2, '세트1 행사', 'set1');
+    await ev.refresh();
+    expect(ev.view.qTotal).toBe(20);
+    expect((await new Http(base).get('/api/host/sets')).status).toBe(401);
+  });
+});
+
 describe('연습용 봇', () => {
   it('진행자가 부른 봇이 실제 경로로 입장·답안 제출하고, 정리하면 서버에서 지워진다', async () => {
     const h2 = await hostLogin(base, password);
