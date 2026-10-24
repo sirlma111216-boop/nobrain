@@ -28,7 +28,7 @@
     { "tag": "v2", "new_sqlite_classes": ["BotsDO"] },
     { "tag": "v3", "new_sqlite_classes": ["LibraryDO"] }
   ],
-  "observability": { "enabled": true },
+  "observability": { "enabled": true, "redact_query_string": true },
   "vars": {
     // 쉼표로 구분한 추가 허용 Origin (vite dev 서버 등). 같은 출처는 항상 허용.
     "ALLOWED_ORIGINS": "http://localhost:5173",
@@ -52,7 +52,7 @@
         ]
       },
       "services": [{ "binding": "SELF", "service": "nobrain-festival-quiz-test" }],
-      "observability": { "enabled": true },
+      "observability": { "enabled": true, "redact_query_string": true },
       "vars": {
         "ALLOWED_ORIGINS": "",
         "APP_ENV": "cloud-test"

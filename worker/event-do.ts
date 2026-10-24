@@ -173,6 +173,7 @@ export class EventDO extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => {
       this.migrate();
       this.load();
+      if (!(await this.expireIfDue())) await this.scheduleAlarm();
     });
     // 앱 수준 ping 은 Object 를 깨우지 않고 런타임이 바로 응답한다 (Hibernation 유지)
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
@@ -208,6 +209,37 @@ export class EventDO extends DurableObject<Env> {
 
   private saveState() {
     this.sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('state', ?)`, JSON.stringify(this.st));
+    this.ctx.waitUntil(this.scheduleAlarm());
+  }
+
+  private expiry(): number | null {
+    if (!this.st) return null;
+    const date = new Date(this.st.createdAt);
+    date.setUTCFullYear(date.getUTCFullYear() + 1);
+    return date.getTime();
+  }
+
+  private async scheduleAlarm(roundDeadline?: number): Promise<void> {
+    const expiry = this.expiry();
+    if (expiry === null) return this.ctx.storage.deleteAlarm();
+    const round = roundDeadline ?? (this.round?.status === 'open' ? this.round.ends_at : Infinity);
+    await this.ctx.storage.setAlarm(Math.max(Date.now() + 1, Math.min(expiry, round)));
+  }
+
+  private async expireIfDue(): Promise<boolean> {
+    const expiry = this.expiry();
+    if (expiry === null || Date.now() < expiry) return false;
+    if (this.flushTimer) clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    for (const ws of this.ctx.getWebSockets()) { try { ws.close(1000, 'retention expired'); } catch {} }
+    await this.ctx.storage.deleteAll();
+    await this.ctx.storage.deleteAlarm();
+    this.st = this.round = this.top = null;
+    this.submitted = this.registered = 0;
+    this.genCache.clear(); this.qs.clear(); this.buckets.clear(); this.joinFails.clear();
+    // Recreate only the empty schema so a new event can be initialized safely.
+    this.migrate();
+    return true;
   }
 
   /** 이 행사의 문제. 복사본이 없는 옛 행사는 코드의 기본 세트에서 찾는다 */
@@ -539,7 +571,7 @@ export class EventDO extends DurableObject<Env> {
     });
     this.round = this.loadRound(r.run);
     this.top = null;
-    this.ctx.storage.deleteAlarm().catch(() => {});
+    this.ctx.waitUntil(this.scheduleAlarm());
     this.broadcastAll();
   }
 
@@ -586,8 +618,9 @@ export class EventDO extends DurableObject<Env> {
   }
 
   async alarm() {
+    if (await this.expireIfDue()) return;
     this.tick();
-    if (this.round && this.round.status === 'open') await this.ctx.storage.setAlarm(this.round.ends_at);
+    await this.scheduleAlarm();
   }
 
   // ───────────── 진행자 명령 ─────────────
@@ -647,7 +680,7 @@ export class EventDO extends DurableObject<Env> {
         this.round = this.loadRound(run);
         this.submitted = 0;
         this.top = null;
-        this.ctx.storage.setAlarm(ends).catch(() => {});
+        this.ctx.waitUntil(this.scheduleAlarm(ends));
         this.broadcastAll();
         return { ok: true };
       }
@@ -660,7 +693,7 @@ export class EventDO extends DurableObject<Env> {
         st.sv++;
         this.saveState();
         this.round = this.loadRound(this.round.run);
-        this.ctx.storage.setAlarm(ends).catch(() => {});
+        this.ctx.waitUntil(this.scheduleAlarm(ends));
         this.broadcastAll();
         return { ok: true };
       }
@@ -777,7 +810,7 @@ export class EventDO extends DurableObject<Env> {
         this.round = null;
         this.submitted = 0;
         this.top = null;
-        this.ctx.storage.deleteAlarm().catch(() => {});
+        this.ctx.waitUntil(this.scheduleAlarm());
         if (wipeParticipants) {
           this.registered = 0;
           this.genCache.clear();
