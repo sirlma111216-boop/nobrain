@@ -180,6 +180,13 @@ export class EventDO extends DurableObject<Env> {
   }
 
   // ───────────── 저장/복구 ─────────────
+  /** Internal namespace RPC; constructor applies retention before this is called. */
+  async ensureRetention(): Promise<{ stored: boolean; armed: boolean }> {
+    const expiry = this.expiry();
+    if (expiry !== null && !Number.isFinite(expiry)) throw new Error('Missing retention timestamp');
+    await this.scheduleAlarm();
+    return { stored: this.st !== null, armed: (await this.ctx.storage.getAlarm()) !== null };
+  }
   private migrate() {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS _schema (v INTEGER NOT NULL)`);
     const cur = this.sql.exec<{ v: number }>(`SELECT v FROM _schema`).toArray()[0]?.v ?? 0;
