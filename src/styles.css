@@ -188,6 +188,12 @@ body[data-page='board'] { background: #000; overflow: hidden; }
 .b-bar-t, .b-bar-n { position: relative; z-index: 1; }
 .b-answer { flex: 1; max-width: 50%; }
 .b-ans { font-size: 12em; font-weight: 900; color: var(--accent); line-height: 1.1; }
+.b-tally { display: flex; gap: .6em; margin-top: .5em; font-size: 3.6em; font-weight: 800; }
+.b-tally > div { flex: 1; padding: .25em .5em; border-radius: .3em; display: flex; align-items: baseline; gap: .3em; white-space: nowrap; }
+.b-tally span { font-size: .6em; opacity: .9; }
+.b-tally b { font-size: 1.6em; line-height: 1; }
+.b-tally-ok { background: rgba(79, 211, 154, .18); color: #7ff0bd; }
+.b-tally-no { background: rgba(255, 112, 133, .18); color: #ffa3b1; }
 .b-exp { font-size: 3em; color: #dfe2ff; line-height: 1.5; margin-top: .6em; }
 .b-void { font-size: 4em; font-weight: 900; color: #ff9aa8; margin-top: .5em; }
 .b-winners { flex: 1; display: flex; flex-direction: column; align-items: center; padding-top: .5em; min-height: 0; }

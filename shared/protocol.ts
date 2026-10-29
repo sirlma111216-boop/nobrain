@@ -5,7 +5,8 @@ export type Phase = 'lobby' | 'ready' | 'open' | 'closed' | 'ended';
 
 /**
  * 공개 단계 (closed 이후)
- * 1 문제 공개(=open) · 2 접수 마감 · 3 대표 답안 · 4 정답·해설 · 5 정답자 수·명단
+ * 1 문제 공개(=open) · 2 접수 마감 · 3 대표 답안 · 4 정답·해설·맞힘/틀림 수 · 5 정답자 수·명단
+ * 시간이 끝나거나 조기 마감하면 바로 4 로 간다(정답과 맞힌·틀린 수를 한 번에 공개). 2·3·5 는 진행자가 고를 때만.
  */
 export type Stage = 1 | 2 | 3 | 4 | 5;
 
@@ -47,6 +48,7 @@ export interface BoardView {
   question?: { prompt: string; image: string; imageAlt: string };
   featured?: { text: string; count: number }[];
   answer?: { display: string; explanation: string };
+  tally?: { correct: number; wrong: number }; // 4 단계부터. wrong = 냈지만 틀린 사람(안 낸 사람 제외)
   voided?: boolean;
   winners?: { count: number; names: string[]; page: number; pages: number };
 }

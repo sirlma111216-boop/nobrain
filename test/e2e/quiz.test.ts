@@ -166,6 +166,7 @@ describe('1번 문제: 접수·수정·중복·순서', () => {
     expect(await until(() => lastBoard()?.phase === 'open')).toBe(true);
     expect(lastBoard().question.prompt).toBe('몇 시일까요?');
     expect(lastBoard().answer).toBeUndefined();
+    expect(lastBoard().tally).toBeUndefined(); // 답을 내는 동안에는 집계도 없다
   });
 
   it('정답·인정 답안·정규화·오답을 접수한다', async () => {
@@ -241,10 +242,21 @@ describe('1번 문제: 접수·수정·중복·순서', () => {
 });
 
 describe('공개 단계·재채점', () => {
-  it('마감 단계 전광판에는 정답·집계가 없다', async () => {
+  it('마감되면 전광판에 정답과 맞힘·틀림 수가 한 번에 나온다(명단·대표 답안은 없음)', async () => {
+    expect(await until(() => lastBoard()?.stage === 4)).toBe(true);
+    const b = lastBoard();
+    expect(b.answer.display).toBe('3시');
+    expect(b.tally).toEqual({ correct: 5, wrong: 1 }); // 학생007 은 안 냈으므로 틀림에 들지 않는다
+    expect(b.winners).toBeUndefined();
+    expect(b.featured).toBeUndefined();
+  });
+
+  it('진행자가 고른 마감 단계 전광판에는 정답·집계가 없다', async () => {
+    await host.mustCmd('stage', { to: 2 });
     expect(await until(() => lastBoard()?.stage === 2)).toBe(true);
     const b = lastBoard();
     expect(b.answer).toBeUndefined();
+    expect(b.tally).toBeUndefined();
     expect(b.winners).toBeUndefined();
     expect(b.featured).toBeUndefined();
   });
@@ -265,6 +277,7 @@ describe('공개 단계·재채점', () => {
       { text: '네시', count: 1 },
     ]);
     expect(b.answer).toBeUndefined();
+    expect(b.tally).toBeUndefined();
     expect(b.winners).toBeUndefined();
   });
 

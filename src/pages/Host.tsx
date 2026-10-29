@@ -10,7 +10,7 @@ const STAGE_LABEL: Record<number, string> = {
   1: '① 문제 공개·접수 중',
   2: '② 접수 마감',
   3: '③ 대표 답안 공개',
-  4: '④ 정답·해설 공개',
+  4: '④ 정답·맞힘/틀림 수 공개',
   5: '⑤ 정답자 수·명단 공개',
 };
 const PHASE_LABEL: Record<string, string> = { lobby: '대기실', ready: '문제 준비', open: '접수 중', closed: '마감됨', ended: '종료' };
@@ -309,23 +309,31 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
           </div>
         )}
         <div className="h-actions">
-          <B name="next" label={ph === 'lobby' ? '첫 문제 준비' : ph === 'ready' ? '이 문제 건너뛰기' : v.nextQuestion ? '다음 문제로' : '퀴즈 끝내기'} on={ph === 'lobby' || ph === 'ready' || ph === 'closed'} />
+          <B name="next" label={ph === 'lobby' ? '첫 문제 준비' : ph === 'ready' ? '이 문제 건너뛰기' : v.nextQuestion ? '다음 문제로' : '퀴즈 끝내기'} on={ph === 'lobby' || ph === 'ready' || ph === 'closed'} kind={ph === 'closed' ? 'primary' : undefined} />
           <B name="start" label="▶ 문제 시작" on={ph === 'ready'} kind="primary" />
           <B name="extend" args={{ sec: 10 }} label="+10초" on={ph === 'open'} />
           <B name="close" label="■ 조기 마감" on={ph === 'open'} kind="warn" />
         </div>
-        {ph === 'ready' && v.question && <p className="h-hint">시작하면 전광판에 문제가 공개되고 {v.question.timeLimitSec}초 동안 답을 받습니다.</p>}
+        {ph === 'ready' && v.question && (
+          <p className="h-hint">
+            시작하면 전광판에 문제가 공개되고 {v.question.timeLimitSec}초 동안 답을 받습니다. 답을 내는 동안에는 정답·집계를 보여 주지 않고,
+            시간이 끝나면 전광판에 <b>정답과 맞힌·틀린 사람 수</b>가 한 번에 나옵니다.
+          </p>
+        )}
         {ph === 'closed' && v.nextQuestion && <p className="h-hint">다음: 문제 {v.nextQuestion.qNo}{v.nextQuestion.prompt ? ` “${v.nextQuestion.prompt}”` : ''}</p>}
       </section>
 
       {ph === 'closed' && (
         <section className="h-card">
           <h2>결과 공개 (현재: {STAGE_LABEL[v.stage]})</h2>
-          <p className="h-hint">정답자 {v.correct ?? 0}명 / 제출 {v.submitted}명 {v.voided ? '· 무효 처리된 문제' : ''}</p>
+          <p className="h-hint">
+            맞힘 {v.correct ?? 0}명 · 틀림 {Math.max(0, v.submitted - (v.correct ?? 0))}명 · 제출 {v.submitted}명 {v.voided ? '· 무효 처리된 문제' : ''}
+            <br />마감과 동시에 전광판에 정답과 맞힘/틀림 수가 나왔습니다. 위의 <b>다음 문제로</b>를 누르면 넘어갑니다. 아래 단계 버튼은 필요할 때만 쓰세요.
+          </p>
           <div className="h-actions">
             <B name="stage" args={{ to: 2 }} label="② 마감 화면" on={v.stage !== 2} />
             <B name="stage" args={{ to: 3 }} label="③ 대표 답안 공개" on={v.stage !== 3 && (v.featured?.length ?? 0) > 0} />
-            <B name="stage" args={{ to: 4 }} label="④ 정답·해설 공개" on={v.stage !== 4} />
+            <B name="stage" args={{ to: 4 }} label="④ 정답·맞힘/틀림 수" on={v.stage !== 4} />
             <B name="stage" args={{ to: 5 }} label="⑤ 정답자 공개" on={v.stage !== 5} />
           </div>
           {v.stage === 5 && (v.winnerPages ?? 1) > 1 && (

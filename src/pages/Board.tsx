@@ -202,6 +202,12 @@ function Scene({ v, qr, joinUrl, remaining }: { v: BoardView; qr: string; joinUr
           <div className="b-answer">
             <div className="b-h2">정답</div>
             <div className="b-ans">{v.answer?.display}</div>
+            {v.tally && (
+              <div className="b-tally">
+                <div className="b-tally-ok"><span>맞힘</span><b>{v.tally.correct}</b>명</div>
+                <div className="b-tally-no"><span>틀림</span><b>{v.tally.wrong}</b>명</div>
+              </div>
+            )}
             <div className="b-exp">{v.answer?.explanation}</div>
             {v.voided && <div className="b-void">이 문제는 무효 처리되었습니다</div>}
           </div>

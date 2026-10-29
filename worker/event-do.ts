@@ -610,7 +610,7 @@ export class EventDO extends DurableObject<Env> {
       );
       this.gradeRun(r.run);
       st.phase = 'closed';
-      st.stage = 2;
+      st.stage = 4; // 마감 = 정답·맞힘/틀림 수 공개. 제출하는 동안에는 아무것도 공개하지 않는다
       st.page = 0;
       st.sv++;
       this.saveState();
@@ -1000,6 +1000,7 @@ export class EventDO extends DurableObject<Env> {
         if (st.stage >= 4) {
           v.answer = { display: q.answerDisplay, explanation: q.explanation };
           v.voided = !!r.voided;
+          if (!r.voided) v.tally = { correct: r.correct, wrong: r.total - r.correct };
         }
         if (st.stage === 5 && !r.voided) {
           const size = LIMITS.winnersPageSize;
