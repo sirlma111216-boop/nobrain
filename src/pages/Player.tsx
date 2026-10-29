@@ -3,7 +3,7 @@ import { api, ApiError, rid, store } from '../lib/api';
 import { LiveSocket, type SocketStatus } from '../lib/socket';
 import { syncClock, useRemaining } from '../lib/clock';
 import type { MyAnswer, PlayerView, SubmitResult } from '../../shared/protocol';
-import { LIMITS } from '../../shared/protocol';
+import { JOIN_KINDS, LIMITS, NAME_MAX_CHARS, cleanName, type JoinKind } from '../../shared/protocol';
 
 interface Me {
   name: string;
@@ -38,15 +38,13 @@ export default function Player() {
   );
 }
 
-function fmtInput(v: string) {
-  const s = v.normalize('NFKC').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 8);
-  return s.length > 4 ? s.slice(0, 4) + '-' + s.slice(4) : s;
-}
-
 function JoinForm({ notice, onJoined }: { notice: string; onJoined: (m: Me) => void }) {
   const params = new URLSearchParams(location.search);
   const [event, setEvent] = useState((params.get('e') ?? store.get('qz:event') ?? '').toUpperCase().slice(0, 6));
-  const [code, setCode] = useState('');
+  // QR(/?e=행사코드)로 들어오면 행사 코드 칸은 접어 두고 구분·이름만 받는다
+  const [editEvent, setEditEvent] = useState(event.length !== 6);
+  const [kind, setKind] = useState<JoinKind | ''>('');
+  const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -55,7 +53,7 @@ function JoinForm({ notice, onJoined }: { notice: string; onJoined: (m: Me) => v
     setErr('');
     setBusy(true);
     try {
-      const r = await api<Me & { ok: boolean }>('/api/join', { body: { event, code } });
+      const r = await api<Me & { ok: boolean }>('/api/join', { body: { event, kind, name: name.trim() } });
       store.set('qz:event', r.event);
       onJoined({ name: r.name, event: r.event, title: r.title });
     } catch (e) {
@@ -76,38 +74,61 @@ function JoinForm({ notice, onJoined }: { notice: string; onJoined: (m: Me) => v
       <main className="p-card">
         <h1 className="p-h1">입장하기</h1>
         {notice && <p className="p-msg warn">{notice}</p>}
-        <label className="p-label" htmlFor="ev">행사 코드</label>
+        {editEvent ? (
+          <>
+            <label className="p-label" htmlFor="ev">행사 코드</label>
+            <input
+              id="ev"
+              className="p-input code"
+              inputMode="text"
+              autoCapitalize="characters"
+              autoComplete="off"
+              spellCheck={false}
+              value={event}
+              maxLength={6}
+              onChange={(e) => setEvent(e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6))}
+              onKeyDown={onKey}
+              placeholder="예: AB12CD"
+            />
+          </>
+        ) : (
+          <p className="p-event">
+            행사 코드 <b className="mono">{event}</b>
+            <button type="button" className="p-link" onClick={() => setEditEvent(true)}>바꾸기</button>
+          </p>
+        )}
+        <span className="p-label" id="kind-label">구분</span>
+        <div className="p-kinds" role="radiogroup" aria-labelledby="kind-label">
+          {JOIN_KINDS.map((k) => (
+            <button
+              key={k.id}
+              type="button"
+              role="radio"
+              aria-checked={kind === k.id}
+              className={'p-kind' + (kind === k.id ? ' on' : '')}
+              onClick={() => setKind(k.id)}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+        <label className="p-label" htmlFor="name">이름</label>
         <input
-          id="ev"
-          className="p-input code"
-          inputMode="text"
-          autoCapitalize="characters"
+          id="name"
+          className="p-input"
           autoComplete="off"
           spellCheck={false}
-          value={event}
-          maxLength={6}
-          onChange={(e) => setEvent(e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6))}
+          value={name}
+          maxLength={NAME_MAX_CHARS + 5}
+          onChange={(e) => setName(cleanName(e.target.value))}
           onKeyDown={onKey}
-          placeholder="예: AB12CD"
-        />
-        <label className="p-label" htmlFor="code">개인 참가 코드</label>
-        <input
-          id="code"
-          className="p-input code"
-          inputMode="text"
-          autoCapitalize="characters"
-          autoComplete="off"
-          spellCheck={false}
-          value={code}
-          onChange={(e) => setCode(fmtInput(e.target.value))}
-          onKeyDown={onKey}
-          placeholder="XXXX-XXXX"
+          placeholder="예: 김민지"
         />
         {err && <p className="p-msg err" role="alert">{err}</p>}
-        <button className="p-btn" disabled={busy || event.length !== 6 || code.replace('-', '').length !== 8} onClick={join}>
+        <button className="p-btn" disabled={busy || event.length !== 6 || !kind || !name.trim()} onClick={join}>
           {busy ? '확인 중…' : '입장'}
         </button>
-        <p className="p-hint">참가 코드는 한 사람에게 하나씩 나누어 준 코드입니다. 다른 기기에서 같은 코드로 입장하면 이 기기의 연결은 끝납니다.</p>
+        <p className="p-hint">이름은 정답자 명단에 나올 수 있습니다. 같은 이름이 이미 있으면 뒤에 번호가 붙습니다(김민지2).</p>
       </main>
     </div>
   );
@@ -318,7 +339,7 @@ function Game({ me, onLeave }: { me: Me; onLeave: (msg: string) => void }) {
   };
 
   const logout = async () => {
-    if (!confirm2('이 기기에서 나갈까요? 다시 들어오려면 참가 코드가 필요합니다.')) return;
+    if (!confirm2('이 기기에서 나갈까요? 다시 들어오면 새 참가자로 등록되고, 지금까지 낸 답은 이어지지 않습니다.')) return;
     try {
       await api('/api/logout', { body: {} });
     } catch {

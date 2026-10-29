@@ -85,6 +85,32 @@ describe('입장·권한', () => {
     expect(bots[0].view.phase).toBe('lobby');
   });
 
+  it('코드 없이 구분·이름으로 입장하고, 같은 이름은 번호가 붙고, 봇 구분은 스스로 고를 수 없다', async () => {
+    const h2 = await hostLogin(base, password);
+    const ev = await Host.create(h2, '이름 입장 시험');
+    const a = new Bot(base);
+    const r1 = await a.register(ev.event, 'student', '  김민지 ');
+    expect(r1.status).toBe(200);
+    expect(r1.data.name).toBe('김민지');
+    expect(await a.connect()).toBe(true);
+    expect(a.view.phase).toBe('lobby');
+    const b2 = new Bot(base);
+    expect((await b2.register(ev.event, 'parent', '김민지')).data.name).toBe('김민지2');
+    const c = new Bot(base);
+    expect((await c.register(ev.event, 'visitor', '<b>박 지 훈</b>!!')).data.name).toBe('b박 지 훈b');
+    const bad = new Bot(base);
+    expect((await bad.register(ev.event, 'teacher', '선생')).status).toBe(400);
+    expect((await bad.register(ev.event, 'bot', '가짜')).status).toBe(400); // 진행자 토큰 없이 봇 구분 불가
+    expect((await bad.register(ev.event, 'student', '!!!')).status).toBe(400);
+    expect((await bad.register(ev.event, 'student', '가'.repeat(30))).data.name).toBe('가'.repeat(10));
+    expect((await new Bot(base).register('ZZZZZZ', 'student', '아무개')).status).toBe(404);
+    await ev.refresh();
+    expect(ev.view.kinds).toMatchObject({ student: 2, parent: 1, visitor: 1 });
+    const res = await ev.results();
+    expect(res.rows.map((x: any) => x.kind)).toEqual(['student', 'parent', 'visitor', 'student']);
+    a.disconnect();
+  });
+
   it('학생은 진행자 명령·진행자 화면·내보내기·전광판에 접근할 수 없다', async () => {
     const b = bots[0];
     expect((await b.http.post('/api/host/cmd', { event: host.event, cmd: 'next', cmdId: rid(), sv: 1 })).status).toBe(401);

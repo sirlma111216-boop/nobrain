@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import QRCode from 'qrcode';
+import { joinUrlFor, useQr } from '../lib/qr';
 import { api, ApiError } from '../lib/api';
 import { LiveSocket, type SocketStatus } from '../lib/socket';
 import { syncClock, useRemaining } from '../lib/clock';
@@ -55,14 +55,6 @@ export default function Board() {
   return <Live onLost={(e) => { setErr(e); setState('need-link'); }} />;
 }
 
-function useQr(text: string) {
-  const [src, setSrc] = useState('');
-  useEffect(() => {
-    QRCode.toDataURL(text, { margin: 1, width: 720, errorCorrectionLevel: 'M' }).then(setSrc).catch(() => setSrc(''));
-  }, [text]);
-  return src;
-}
-
 function Live({ onLost }: { onLost: (msg: string) => void }) {
   const [v, setV] = useState<BoardView | null>(null);
   const [conn, setConn] = useState<SocketStatus>('connecting');
@@ -90,7 +82,7 @@ function Live({ onLost }: { onLost: (msg: string) => void }) {
     };
   }, [onLost]);
 
-  const joinUrl = `${location.origin}/?e=${v?.ev ?? ''}`;
+  const joinUrl = joinUrlFor(v?.ev ?? '');
   const qr = useQr(joinUrl);
   const remaining = useRemaining(v?.endsAt, v?.phase === 'open');
 
@@ -133,7 +125,7 @@ function Scene({ v, qr, joinUrl, remaining }: { v: BoardView; qr: string; joinUr
       <div className="b-lobby">
         <div className="b-title">{v.title}</div>
         <JoinBox qr={qr} joinUrl={joinUrl} ev={v.ev} big />
-        <div className="b-sub">휴대폰 카메라로 QR 코드를 찍고, 받은 참가 코드로 입장하세요.</div>
+        <div className="b-sub">휴대폰 카메라로 QR 코드를 찍고, 구분을 고른 뒤 이름을 쓰고 입장하세요.</div>
       </div>
     );
   }

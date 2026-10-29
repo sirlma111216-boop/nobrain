@@ -1,7 +1,7 @@
 // 연습용 봇 실행기 — 행사 하나에 Object 하나.
 //
 // ★ 봇은 진짜 참가자와 같은 경로로만 움직인다.
-//   입장: POST /api/join (참가 코드 → 쿠키)  ·  상태: GET /ws?role=p (쿠키·Origin 검사)  ·  답안: POST /api/answer
+//   입장: POST /api/join (구분·이름 → 쿠키. 진짜 화면과 다른 점은 x-quiz-bot 머리글 하나뿐 → 'bot' 구분)  ·  상태: GET /ws?role=p (쿠키·Origin 검사)  ·  답안: POST /api/answer
 //   모두 SELF 서비스 바인딩으로 이 Worker 의 fetch 핸들러를 거친다(인증·Origin·CSRF 검사 그대로).
 //   진짜 휴대폰이 답을 보내는 시점 = WebSocket 으로 'open' 상태를 받은 뒤 사람이 입력·제출하는 시점.
 //   그 시점이 바뀌면(예: 제출 방식 변경) 이 파일도 같이 고칠 것.
@@ -11,8 +11,10 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { PlayerView, SubmitResult } from '../shared/protocol';
 import type { EventDO } from './event-do';
+import { signToken } from './auth';
 
 const MAX_RUN_MS = 60 * 60_000;
+const BOT_NICKS = ['가람', '나래', '다올', '라온', '마루', '바다', '보람', '빛나', '새롬', '솔빛', '아라', '여름', '온새', '우람', '윤슬', '이슬', '자람', '초롱', '타리', '파랑', '푸름', '하늘', '한별', '해든', '햇살', '호수', '가온', '누리', '다솜', '도담', '미르', '별하', '봄이', '샛별', '소담', '시내', '은솔', '지음', '찬솔', '하람'];
 
 interface Persona {
   silent: boolean; // 끝까지 답을 안 내는 사람
@@ -26,7 +28,6 @@ interface Persona {
 interface Bot {
   i: number;
   name: string;
-  code: string;
   cookie: string;
   ws: WebSocket | null;
   view: PlayerView | null;
@@ -78,6 +79,7 @@ export class BotsDO extends DurableObject<Env> {
   private stopping = false;
   private qmap = new Map<string, { accepted: string[]; decoys: string[] }>();
   private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private botKey = '';
 
   status(): BotStatus {
     return {
@@ -95,11 +97,11 @@ export class BotsDO extends DurableObject<Env> {
     };
   }
 
-  /** 봇 시작. codes 는 방금 만든 봇용 참가 코드(평문). 입장은 joinSpreadMs 동안 흩어서 한다. */
+  /** 봇 시작. 입장은 joinSpreadMs 동안 흩어서 한다. 이름 뒤 '(봇)' 은 서버가 붙인다. */
   async start(
     ev: string,
     origin: string,
-    codes: { code: string; name: string }[],
+    count: number,
     questions: { id: string; accepted: string[]; decoys: string[] }[],
     joinSpreadMs = 8000,
   ): Promise<BotStatus> {
@@ -111,10 +113,11 @@ export class BotsDO extends DurableObject<Env> {
     this.startedAt = Date.now();
     this.stopsAt = this.startedAt + MAX_RUN_MS;
     this.stats = { submitted: 0, rejected: {}, errors: 0, lastError: null };
-    this.bots = codes.map((c, i) => ({
+    // 'bot' 구분 입장 허가. 진행자 토큰 형식이지만 쿠키가 아니라 이 머리글로만 쓴다.
+    this.botKey = await signToken(this.env.SESSION_SECRET, { r: 'h', x: Math.floor(this.stopsAt / 1000) });
+    this.bots = Array.from({ length: count }, (_, i) => ({
       i,
-      name: c.name,
-      code: c.code,
+      name: BOT_NICKS[i % BOT_NICKS.length] + (i >= BOT_NICKS.length ? String(Math.floor(i / BOT_NICKS.length) + 1) : ''),
       cookie: '',
       ws: null,
       view: null,
@@ -174,8 +177,9 @@ export class BotsDO extends DurableObject<Env> {
   }
 
   // ───── 진짜 참가자와 같은 요청 ─────
-  private req(path: string, init: { method?: string; body?: unknown; cookie?: string; ws?: boolean }) {
+  private req(path: string, init: { method?: string; body?: unknown; cookie?: string; ws?: boolean; bot?: boolean }) {
     const headers = new Headers({ origin: this.origin });
+    if (init.bot) headers.set('x-quiz-bot', this.botKey);
     if (init.cookie) headers.set('cookie', init.cookie);
     if (init.body !== undefined) {
       headers.set('content-type', 'application/json');
@@ -194,7 +198,7 @@ export class BotsDO extends DurableObject<Env> {
   private async join(b: Bot) {
     if (b.dead) return;
     try {
-      const r = await this.req('/api/join', { body: { event: this.ev, code: b.code } });
+      const r = await this.req('/api/join', { body: { event: this.ev, kind: 'bot', name: b.name }, bot: true });
       if (r.status !== 200) {
         this.err(`입장 실패 ${r.status}`);
         return;

@@ -181,6 +181,12 @@ export class Bot {
     if (r.status === 200) this.name = r.data.name;
     return r;
   }
+  /** 참가 코드 없이 구분(student·parent·visitor)과 이름으로 입장 — 실제 휴대폰 화면과 같은 요청 */
+  async register(event, kind, name) {
+    const r = await this.http.post('/api/join', { event, kind, name });
+    if (r.status === 200) this.name = r.data.name;
+    return r;
+  }
   connect() {
     return new Promise((resolve) => {
       let done = false;

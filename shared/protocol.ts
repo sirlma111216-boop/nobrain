@@ -83,6 +83,7 @@ export interface HostView {
   boot: string; // Object 인스턴스 식별값(재시작·Hibernation 관찰용)
   registered: number;
   bots: number; // 등록 인원 중 연습용 봇
+  kinds: Record<string, number>; // 구분별 등록 인원 (student·parent·visitor 등)
   connected: number; // 참고치(네트워크 상태에 따라 지연)
   boards: number;
   submitted: number; // 현재 문제 제출 인원
@@ -136,3 +137,27 @@ export const LIMITS = {
   answerMaxRawChars: 100,
   winnersPageSize: 30,
 } as const;
+
+/** 참가자가 입장할 때 고르는 구분. 'teacher'·'load'·'bot' 은 이 목록에 없다(진행자·도구 전용). */
+export const JOIN_KINDS = [
+  { id: 'student', label: '학생' },
+  { id: 'parent', label: '학부모' },
+  { id: 'visitor', label: '관람객' },
+] as const;
+export type JoinKind = (typeof JOIN_KINDS)[number]['id'];
+
+export const NAME_MAX_CHARS = 10;
+
+/** 참가자 이름 정리: 한글·영문·숫자·띄어쓰기만 남기고 최대 10자. 화면과 서버가 같은 규칙을 쓴다. */
+export function cleanName(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  return Array.from(
+    raw
+      .normalize('NFC')
+      .replace(/[^0-9A-Za-z가-힣ㄱ-ㆎ ]/g, '')
+      .replace(/ {2,}/g, ' ')
+      .trimStart(),
+  )
+    .slice(0, NAME_MAX_CHARS)
+    .join('');
+}

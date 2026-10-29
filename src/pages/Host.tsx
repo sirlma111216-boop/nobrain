@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, rid, store } from '../lib/api';
 import { LiveSocket, type SocketStatus } from '../lib/socket';
 import { syncClock, useRemaining } from '../lib/clock';
-import type { HostView } from '../../shared/protocol';
+import { joinUrlFor, useQr } from '../lib/qr';
+import { JOIN_KINDS, type HostView } from '../../shared/protocol';
 
 const STAGE_LABEL: Record<number, string> = {
   0: '-',
@@ -177,8 +178,6 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
   const [boardLink, setBoardLink] = useState('');
   const [featured, setFeatured] = useState<string[]>([]);
   const [acceptText, setAcceptText] = useState('');
-  const [codeCount, setCodeCount] = useState(10);
-  const [codeKind, setCodeKind] = useState('student');
   const [resetText, setResetText] = useState('');
   const [resetAll, setResetAll] = useState(false);
   const vRef = useRef<HostView | null>(null);
@@ -256,18 +255,6 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
     );
   }
 
-  const genCodes = async () => {
-    setBusy('codes');
-    setMsg(null);
-    try {
-      const r = await api<{ inserted: number }>('/api/host/codes', { body: { event, count: codeCount, kind: codeKind }, timeoutMs: 60_000 });
-      setMsg({ ok: true, text: `참가 코드 ${r.inserted}개를 만들었습니다. CSV 로 내려받아 나눠 주세요.` });
-    } catch (e) {
-      setMsg({ ok: false, text: (e as ApiError).message });
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const B = (p: { name: string; args?: Record<string, unknown>; label: string; on: boolean; kind?: string }) => (
     <button className={'h-btn ' + (p.kind ?? '')} disabled={!p.on || !!busy} onClick={() => cmd(p.name, p.args, p.label)}>
@@ -288,7 +275,14 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
       </header>
 
       <section className="h-stats">
-        <Stat label={v.bots ? `등록 인원 (봇 ${v.bots})` : '등록 인원'} value={v.registered} />
+        <Stat
+          label={v.bots ? `등록 인원 (봇 ${v.bots})` : '등록 인원'}
+          value={v.registered}
+          hint={JOIN_KINDS.map((k) => `${k.label} ${v.kinds?.[k.id] ?? 0}`).join(' · ')}
+        />
+        {JOIN_KINDS.map((k) => (
+          <Stat key={k.id} label={k.label} value={v.kinds?.[k.id] ?? 0} />
+        ))}
         <Stat label="현재 연결(참고)" value={v.connected} hint="네트워크 상태에 따라 늦게 반영될 수 있습니다" />
         <Stat label="이번 문제 제출" value={ph === 'open' || ph === 'closed' ? v.submitted : '-'} />
         <Stat label="전광판" value={v.boards} />
@@ -412,27 +406,14 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
         )}
       </section>
 
-      <section className="h-card">
-        <h2>참가 코드</h2>
-        <div className="h-row">
-          <input className="h-input short" type="number" min={1} max={1000} value={codeCount} onChange={(e) => setCodeCount(Number(e.target.value))} />
-          <select className="h-input short" value={codeKind} onChange={(e) => setCodeKind(e.target.value)}>
-            <option value="student">학생</option>
-            <option value="teacher">교사</option>
-            <option value="load">부하 시험</option>
-          </select>
-          <button className="h-btn" disabled={!!busy} onClick={genCodes}>코드 만들기</button>
-          <button className="h-btn" onClick={() => download(`/api/host/export/codes?event=${event}`)}>코드 CSV 내려받기</button>
-        </div>
-        <p className="h-hint">CSV 파일에는 개인 참가 코드가 들어 있습니다. 공개 폴더·저장소에 올리지 마세요.</p>
-      </section>
+      <JoinCard ev={v.ev} />
 
       <BotsCard event={event} />
 
       <section className="h-card danger">
         <h2>시험 행사 초기화</h2>
         <p className="h-hint">답안·채점 결과·진행 기록을 지우고 대기실로 돌아갑니다. 되돌릴 수 없습니다.</p>
-        <label className="h-check"><input type="checkbox" checked={resetAll} onChange={(e) => setResetAll(e.target.checked)} /> 참가자·참가 코드도 함께 삭제</label>
+        <label className="h-check"><input type="checkbox" checked={resetAll} onChange={(e) => setResetAll(e.target.checked)} /> 참가자도 함께 삭제</label>
         <div className="h-row">
           <input className="h-input short" value={resetText} onChange={(e) => setResetText(e.target.value.toUpperCase())} placeholder={`확인: ${v.ev} 입력`} />
           <button
@@ -455,6 +436,31 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
         </section>
       )}
     </div>
+  );
+}
+
+/** 입장 QR: 행사를 만들자마자 여기서 보여 주거나 이미지로 저장해 인쇄·게시할 수 있다 */
+function JoinCard({ ev }: { ev: string }) {
+  const url = joinUrlFor(ev);
+  const qr = useQr(url);
+  return (
+    <section className="h-card">
+      <h2>입장 QR</h2>
+      <div className="h-join">
+        {qr && <img className="h-qr" src={qr} alt="입장 QR 코드" />}
+        <div className="h-join-info">
+          <p className="h-hint">
+            휴대폰 카메라로 찍으면 행사 코드(<b className="mono">{ev}</b>)가 채워진 채로 열립니다. 참가자는 <b>학생 · 학부모 · 관람객</b> 중 하나를 고르고
+            이름을 쓰면 바로 입장합니다. 같은 이름은 뒤에 번호가 붙습니다(김민지2).
+          </p>
+          <div className="h-row">
+            <input className="h-input mono" readOnly value={url} onFocus={(e) => e.target.select()} />
+            <button className="h-btn" onClick={() => navigator.clipboard?.writeText(url)}>주소 복사</button>
+            {qr && <a className="h-btn" href={qr} download={`입장QR-${ev}.png`}>QR 이미지 저장</a>}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -522,7 +528,7 @@ function BotsCard({ event }: { event: string }) {
     <section className="h-card">
       <h2>연습용 봇 (리허설)</h2>
       <p className="h-hint">
-        가짜 참가자가 <b>진짜 휴대폰과 같은 경로</b>(참가 코드 입장 → 실시간 연결 → 답안 제출)로 들어와 문제마다 답을 냅니다.
+        가짜 참가자가 <b>진짜 휴대폰과 같은 경로</b>(구분·이름으로 입장 → 실시간 연결 → 답안 제출)로 들어와 문제마다 답을 냅니다.
         정답·오답·답 고치기·무응답·마감 직전 제출이 섞여 있습니다. 이름에는 "(봇)"이 붙고, 60분이 지나면 자동으로 멈춥니다.
       </p>
       <div className="h-row">

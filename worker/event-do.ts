@@ -134,7 +134,7 @@ export interface SubmitBody {
 
 export type JoinResult =
   | { ok: true; pid: number; name: string; gen: number; title: string }
-  | { ok: false; error: 'NO_EVENT' | 'BAD_CODE' | 'RATE' };
+  | { ok: false; error: 'NO_EVENT' | 'BAD_CODE' | 'RATE' | 'FULL' | 'BAD_NAME' };
 
 export interface CmdResult {
   ok: boolean;
@@ -144,13 +144,14 @@ export interface CmdResult {
   view?: HostView;
 }
 
-const KIND_PREFIX: Record<string, string> = { student: '학생', teacher: '교사', load: '부하', bot: '봇' };
-// 연습용 봇 이름(진짜 학생 이름과 겹치지 않게 '(봇)' 을 붙인다)
-const BOT_NICKS = ['가람', '나래', '다올', '라온', '마루', '바다', '보람', '빛나', '새롬', '솔빛', '아라', '여름', '온새', '우람', '윤슬', '이슬', '자람', '초롱', '타리', '파랑', '푸름', '하늘', '한별', '해든', '햇살', '호수', '가온', '누리', '다솜', '도담', '미르', '별하', '봄이', '샛별', '소담', '시내', '은솔', '지음', '찬솔', '하람'];
+// 진행자가 만드는 참가 코드용(부하 시험·예전 행사). 참가자가 직접 입장하는 구분은 SELF_KINDS.
+const KIND_PREFIX: Record<string, string> = { student: '학생', teacher: '교사', load: '부하' };
+const SELF_KINDS = new Set(['student', 'parent', 'visitor', 'bot']);
 const MAX_PARTICIPANTS = 3000;
 const HOST_FLUSH_MS = 500; // 진행자 화면 집계 갱신 묶음 간격
 const JOIN_FAIL_WINDOW_MS = 5 * 60_000;
 const JOIN_FAIL_LIMIT = 200; // IP 하나당 5분간 실패 허용 횟수(통신사 공유 IP 고려해 넉넉히)
+const SELF_JOIN_LIMIT = 300; // IP 하나당 5분간 새 입장 허용 횟수(통신사 공유 IP 고려해 넉넉히)
 
 export class EventDO extends DurableObject<Env> {
   private sql: SqlStorage;
@@ -165,6 +166,7 @@ export class EventDO extends DurableObject<Env> {
   private qs = new Map<string, Question>();
   private buckets = new Map<number, { tokens: number; at: number }>();
   private joinFails = new Map<string, number[]>();
+  private selfJoins = new Map<string, number[]>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -243,7 +245,7 @@ export class EventDO extends DurableObject<Env> {
     await this.ctx.storage.deleteAlarm();
     this.st = this.round = this.top = null;
     this.submitted = this.registered = 0;
-    this.genCache.clear(); this.qs.clear(); this.buckets.clear(); this.joinFails.clear();
+    this.genCache.clear(); this.qs.clear(); this.buckets.clear(); this.joinFails.clear(); this.selfJoins.clear();
     // Recreate only the empty schema so a new event can be initialized safely.
     this.migrate();
     return true;
@@ -332,10 +334,7 @@ export class EventDO extends DurableObject<Env> {
         }
         const n = this.sql.exec<{ c: number }>(`SELECT COUNT(*) AS c FROM participants WHERE kind=?`, it.kind).one().c + 1;
         const width = it.kind === 'load' ? 4 : 3;
-        const name =
-          it.kind === 'bot'
-            ? BOT_NICKS[(n - 1) % BOT_NICKS.length] + (n > BOT_NICKS.length ? String(Math.ceil(n / BOT_NICKS.length)) : '') + '(봇)'
-            : prefix + String(n).padStart(width, '0');
+        const name = prefix + String(n).padStart(width, '0');
         this.sql.exec(
           `INSERT INTO participants (code_hash, code_enc, name, kind, created_at) VALUES (?,?,?,?,?)`,
           it.hash,
@@ -386,7 +385,7 @@ export class EventDO extends DurableObject<Env> {
 
   exportCodes(): { name: string; kind: string; enc: string }[] {
     return this.sql
-      .exec<{ name: string; kind: string; enc: string }>(`SELECT name, kind, code_enc AS enc FROM participants ORDER BY pid`)
+      .exec<{ name: string; kind: string; enc: string }>(`SELECT name, kind, code_enc AS enc FROM participants WHERE code_enc != '' ORDER BY pid`)
       .toArray();
   }
 
@@ -429,6 +428,46 @@ export class EventDO extends DurableObject<Env> {
     }
     this.scheduleHostFlush();
     return { ok: true, pid: row.pid, name: row.name, gen, title: this.st.title };
+  }
+
+  /**
+   * 참가 코드 없이 구분·이름으로 입장. 이름은 index.ts 에서 cleanName 으로 정리해 넘긴다.
+   * 같은 이름이 있으면 뒤에 번호를 붙인다(김민지 → 김민지2). 연습용 봇은 이름 뒤에 '(봇)' 이 붙는다.
+   */
+  register(kind: string, name: string, ip: string): JoinResult {
+    this.tick();
+    if (!this.st) return { ok: false, error: 'NO_EVENT' };
+    if (!SELF_KINDS.has(kind)) return { ok: false, error: 'BAD_NAME' };
+    if (!name) return { ok: false, error: 'BAD_NAME' };
+    if (this.registered >= MAX_PARTICIPANTS) return { ok: false, error: 'FULL' };
+    if (kind !== 'bot') {
+      const now = Date.now();
+      const arr = (this.selfJoins.get(ip) ?? []).filter((t) => now - t < JOIN_FAIL_WINDOW_MS);
+      if (arr.length >= SELF_JOIN_LIMIT) return { ok: false, error: 'RATE' };
+      arr.push(now);
+      this.selfJoins.set(ip, arr);
+      if (this.selfJoins.size > 5000) this.selfJoins.clear(); // 메모리 보호
+    }
+    const base = kind === 'bot' ? name + '(봇)' : name;
+    let unique = base;
+    for (let n = 2; this.sql.exec(`SELECT 1 FROM participants WHERE name=?`, unique).toArray().length; n++) unique = base + n;
+    const now = Date.now();
+    // code_hash 는 UNIQUE NOT NULL 이라 코드 없는 참가자에게는 무작위 값을 넣는다(어떤 코드의 해시와도 겹치지 않는 형식)
+    const pid = this.sql
+      .exec<{ pid: number }>(
+        `INSERT INTO participants (code_hash, code_enc, name, kind, session_gen, joined_at, created_at) VALUES (?,?,?,?,1,?,?) RETURNING pid`,
+        'self:' + crypto.randomUUID(),
+        '',
+        unique,
+        kind,
+        now,
+        now,
+      )
+      .one().pid;
+    this.registered++;
+    this.genCache.set(pid, 1);
+    this.scheduleHostFlush();
+    return { ok: true, pid, name: unique, gen: 1, title: this.st.title };
   }
 
   private genOf(pid: number): number | null {
@@ -1016,6 +1055,9 @@ export class EventDO extends DurableObject<Env> {
       boot: this.boot,
       registered: this.registered,
       bots: this.sql.exec<{ c: number }>(`SELECT COUNT(*) AS c FROM participants WHERE kind='bot'`).one().c,
+      kinds: Object.fromEntries(
+        this.sql.exec<{ kind: string; c: number }>(`SELECT kind, COUNT(*) AS c FROM participants GROUP BY kind`).toArray().map((x) => [x.kind, x.c]),
+      ),
       connected: pids.size,
       boards: this.ctx.getWebSockets('b').length,
       submitted: this.submitted,

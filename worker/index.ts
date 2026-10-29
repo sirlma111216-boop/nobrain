@@ -6,7 +6,8 @@ import { QUESTION_SETS, SET_BY_ID } from './quiz/bank';
 import { validateQuestion } from './quiz/validate';
 import { LibraryDO, MAX_MEDIA_BYTES } from './library-do';
 import { cleanAnswer, isCorrect, normKey } from './quiz/grading';
-import { EventDO, type SubmitBody } from './event-do';
+import { EventDO, type JoinResult, type SubmitBody } from './event-do';
+import { JOIN_KINDS, cleanName } from '../shared/protocol';
 import { BotsDO } from './bots-do';
 import {
   COOKIE,
@@ -62,6 +63,8 @@ async function createCodes(env: Env, stub: DurableObjectStub<EventDO>, ev: strin
   }
   return made;
 }
+
+const KIND_KO: Record<string, string> = { student: '학생', parent: '학부모', visitor: '관람객', teacher: '교사', load: '부하시험', bot: '연습봇' };
 
 const EVENT_CODE_LEN = 6;
 const PART_CODE_LEN = 8;
@@ -228,16 +231,31 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (path === '/api/join' && method === 'POST') {
     const b = await readJson(req);
     const ev = normalizeCode(b.event);
-    const code = normalizeCode(b.code);
     if (ev.length !== EVENT_CODE_LEN) throw new HttpError(400, 'BAD_EVENT', '행사 코드를 확인하세요. (6자리)');
-    if (code.length !== PART_CODE_LEN) throw new HttpError(400, 'BAD_CODE', '참가 코드를 확인하세요. (8자리)');
-    const hash = await codeHash(env.SESSION_SECRET, ev, code);
     const t0 = Date.now();
-    const r = await eventStub(env, ev).join(hash, clientIp(req));
+    let r: JoinResult;
+    if (b.code !== undefined) {
+      // 진행자가 만든 참가 코드로 입장(부하 시험 도구·예전 행사)
+      const code = normalizeCode(b.code);
+      if (code.length !== PART_CODE_LEN) throw new HttpError(400, 'BAD_CODE', '참가 코드를 확인하세요. (8자리)');
+      r = await eventStub(env, ev).join(await codeHash(env.SESSION_SECRET, ev, code), clientIp(req));
+    } else {
+      // 구분을 고르고 이름을 써서 입장. 연습용 봇은 진행자 토큰을 머리글로 보내 'bot' 구분이 된다.
+      let kind = typeof b.kind === 'string' ? b.kind : '';
+      if (kind === 'bot' || !JOIN_KINDS.some((k) => k.id === kind)) {
+        const bot = await verifyToken(env.SESSION_SECRET, req.headers.get('x-quiz-bot'));
+        if (kind !== 'bot' || bot?.r !== 'h') throw new HttpError(400, 'BAD_KIND', '학생·학부모·관람객 중 하나를 고르세요.');
+      }
+      const name = cleanName(b.name).trim();
+      if (!name) throw new HttpError(400, 'BAD_NAME', '이름을 입력하세요. (한글·영문·숫자 10자까지)');
+      r = await eventStub(env, ev).register(kind, name, clientIp(req));
+    }
     const timing = { 'server-timing': `do;dur=${Date.now() - t0}` };
     if (!r.ok) {
       if (r.error === 'NO_EVENT') throw new HttpError(404, 'NO_EVENT', '행사 코드를 찾을 수 없습니다.');
-      if (r.error === 'RATE') throw new HttpError(429, 'RATE', '실패한 시도가 너무 많습니다. 잠시 후 다시 시도하세요.');
+      if (r.error === 'RATE') throw new HttpError(429, 'RATE', '시도가 너무 많습니다. 잠시 후 다시 시도하세요.');
+      if (r.error === 'FULL') throw new HttpError(409, 'FULL', '참가 인원이 가득 찼습니다.');
+      if (r.error === 'BAD_NAME') throw new HttpError(400, 'BAD_NAME', '이름을 확인하세요.');
       throw new HttpError(401, 'BAD_CODE', '참가 코드가 올바르지 않습니다.');
     }
     const token = await signToken(env.SESSION_SECRET, { r: 'p', e: ev, p: r.pid, g: r.gen, x: Math.floor(Date.now() / 1000) + SESSION_TTL_SEC.p });
@@ -457,7 +475,8 @@ async function route(req: Request, env: Env): Promise<Response> {
       const ev = eventParam(b.event);
       const count = Number(b.count);
       const kind = typeof b.kind === 'string' ? b.kind : '';
-      if (!['student', 'teacher', 'load'].includes(kind)) // 'bot' 은 봇 실행 API 로만 throw new HttpError(400, 'KIND', '구분이 올바르지 않습니다.');
+      // 'bot' 은 봇 실행 API 로만. 참가자는 코드 없이 직접 입장하므로 여기서 만드는 코드는 도구·예전 방식용이다.
+      if (!['student', 'teacher', 'load'].includes(kind)) throw new HttpError(400, 'KIND', '구분이 올바르지 않습니다.');
       if (!Number.isInteger(count) || count < 1 || count > 1000) throw new HttpError(400, 'COUNT', '한 번에 1~1000개까지 만들 수 있습니다.');
       const stub = eventStub(env, ev);
       if (!(await stub.exists()).exists) throw new HttpError(404, 'NO_EVENT', '행사를 찾을 수 없습니다.');
@@ -486,8 +505,7 @@ async function route(req: Request, env: Env): Promise<Response> {
         if (!Number.isInteger(count) || count < 1 || count > MAX_BOTS) throw new HttpError(400, 'COUNT', `봇은 1~${MAX_BOTS}명까지 부를 수 있습니다.`);
         await bots.stop(); // 이전 봇 정지
         await stub.removeBots(); // 남아 있던 봇 자료 정리
-        const made = await createCodes(env, stub, ev, count, 'bot');
-        const status = await bots.start(ev, url.origin, made, await stub.questionsForBots());
+        const status = await bots.start(ev, url.origin, count, await stub.questionsForBots());
         return json({ ok: true, status });
       }
       throw new HttpError(400, 'ACTION', '잘못된 요청입니다.');
@@ -496,11 +514,10 @@ async function route(req: Request, env: Env): Promise<Response> {
     if (path === '/api/host/export/codes' && method === 'GET') {
       const ev = eventParam(url.searchParams.get('event'));
       const rows = await eventStub(env, ev).exportCodes();
-      const kindKo: Record<string, string> = { student: '학생', teacher: '교사', load: '부하시험', bot: '연습봇' };
       const out: unknown[][] = [['이름', '구분', '행사코드', '참가코드', '입장주소']];
       for (const r of rows) {
         const c = await decryptCode(env.SESSION_SECRET, r.enc);
-        out.push([r.name, kindKo[r.kind] ?? r.kind, ev, fmtCode(c), `${url.origin}/?e=${ev}`]);
+        out.push([r.name, KIND_KO[r.kind] ?? r.kind, ev, fmtCode(c), `${url.origin}/?e=${ev}`]);
       }
       return csv(out, `codes-${ev}.csv`);
     }
@@ -515,7 +532,7 @@ async function route(req: Request, env: Env): Promise<Response> {
       head.push('총점(무효 제외)');
       const out: unknown[][] = [head];
       for (const row of data.rows) {
-        const line: unknown[] = [row.name, row.kind];
+        const line: unknown[] = [row.name, KIND_KO[row.kind] ?? row.kind];
         for (const c of row.cells) line.push(c?.text ?? '', c ? (c.correct ? 'O' : 'X') : '');
         line.push(row.score);
         out.push(line);

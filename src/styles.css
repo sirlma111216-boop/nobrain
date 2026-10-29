@@ -53,6 +53,12 @@ input, select { font: inherit; }
 .p-label { font-weight: 700; font-size: 15px; margin-top: 4px; }
 .p-input { width: 100%; font-size: 22px; padding: 14px 14px; border: 2px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--ink); outline: none; }
 .p-input:focus { border-color: var(--brand); }
+.p-event { font-size: 17px; margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mono { font-family: ui-monospace, Consolas, monospace; letter-spacing: .06em; }
+.p-link { border: 0; background: none; color: var(--brand); text-decoration: underline; font-size: 15px; padding: 4px; }
+.p-kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.p-kind { font-size: 19px; font-weight: 700; padding: 14px 4px; min-height: 56px; border: 2px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--ink); }
+.p-kind.on { border-color: var(--brand); background: var(--brand); color: var(--brand-ink); }
 .p-input.code { letter-spacing: .12em; text-transform: uppercase; font-family: ui-monospace, Consolas, monospace; }
 .p-input.answer { font-size: 26px; padding: 18px 14px; text-align: center; }
 .p-input:disabled { opacity: .55; }
@@ -105,6 +111,10 @@ input, select { font: inherit; }
 .h-input.short { flex: 0 0 auto; width: 160px; min-width: 0; }
 .h-input.mono { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 .h-btn { padding: 10px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-weight: 700; }
+.h-join { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.h-qr { width: 180px; height: 180px; border-radius: 8px; background: #fff; padding: 6px; image-rendering: pixelated; }
+.h-join-info { flex: 1 1 280px; min-width: 0; }
+a.h-btn { display: inline-block; text-decoration: none; }
 .h-btn.small { padding: 6px 10px; font-size: 14px; }
 .h-btn.primary { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
 .h-btn.warn { background: var(--err-bg); color: var(--err); border-color: var(--err); }
