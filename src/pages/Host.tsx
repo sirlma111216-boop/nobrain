@@ -401,7 +401,11 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
 
       <section className="h-card">
         <h2>전광판</h2>
-        <p className="h-hint">전광판 링크는 읽기 전용 권한입니다. 새로 발급하면 이전 링크는 끊깁니다. 링크를 학생에게 보여 주지 마세요.</p>
+        <p className="h-hint">
+          전광판 링크는 <b>행사마다 따로</b>입니다. 새 행사를 만들면 여기서 링크를 새로 발급해 무대 PC에서 여세요. 예전 행사의 전광판 탭은 예전 QR·문제를 계속 보여 줍니다.
+          새로 발급하면 이전 링크는 끊깁니다. 링크를 학생에게 보여 주지 마세요.
+        </p>
+        {v.boards === 0 && <p className="h-err">이 행사({v.ev})에 연결된 전광판이 없습니다. 아래 <b>전광판 링크 발급</b> → <b>열기</b>로 여세요.</p>}
         <div className="h-actions">
           <button className="h-btn" disabled={!!busy} onClick={() => cmd('boardKey', {}, '전광판 링크 발급')}>전광판 링크 발급</button>
         </div>

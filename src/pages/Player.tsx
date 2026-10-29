@@ -16,8 +16,17 @@ export default function Player() {
   const [notice, setNotice] = useState<string>('');
 
   useEffect(() => {
+    const want = (new URLSearchParams(location.search).get('e') ?? '').toUpperCase();
     api<Me & { ok: boolean }>('/api/me')
-      .then((r) => setMe({ name: r.name, event: r.event, title: r.title }))
+      .then(async (r) => {
+        // 이전 행사에 들어가 있던 기기로 새 행사 QR 을 찍으면 이전 입장을 끝내고 새 행사 입장 화면을 보여 준다
+        if (want.length === 6 && want !== r.event) {
+          await api('/api/logout', { body: {} }).catch(() => {});
+          setMe(null);
+          return;
+        }
+        setMe({ name: r.name, event: r.event, title: r.title });
+      })
       .catch((e: ApiError) => {
         if (e.code === 'KICKED') setNotice(e.message);
         else if (e.status === 0) setNotice('네트워크 연결을 확인한 뒤 새로고침하세요.');
