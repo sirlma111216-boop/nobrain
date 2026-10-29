@@ -98,6 +98,7 @@ interface EvState {
   boardKeyVer: number;
   boardKeyHash: string | null;
   createdAt: number;
+  stageAt?: number; // 지금 공개 단계로 바뀐 시각(누적 성적을 5초 뒤에 띄우는 기준)
 }
 
 type RoundRow = {
@@ -151,6 +152,8 @@ const MAX_PARTICIPANTS = 3000;
 const HOST_FLUSH_MS = 500; // 진행자 화면 집계 갱신 묶음 간격
 const JOIN_FAIL_WINDOW_MS = 5 * 60_000;
 const JOIN_FAIL_LIMIT = 200; // IP 하나당 5분간 실패 허용 횟수(통신사 공유 IP 고려해 넉넉히)
+const STANDINGS_DELAY_MS = 5000; // 맞힘/틀림 수를 보여 준 뒤 누적 성적으로 바꾸기까지
+const STANDINGS_MAX_NAMES = 1000;
 const SELF_JOIN_LIMIT = 300; // IP 하나당 5분간 새 입장 허용 횟수(통신사 공유 IP 고려해 넉넉히)
 
 export class EventDO extends DurableObject<Env> {
@@ -611,6 +614,7 @@ export class EventDO extends DurableObject<Env> {
       this.gradeRun(r.run);
       st.phase = 'closed';
       st.stage = 4; // 마감 = 정답·맞힘/틀림 수 공개. 제출하는 동안에는 아무것도 공개하지 않는다
+      st.stageAt = now;
       st.page = 0;
       st.sv++;
       this.saveState();
@@ -754,6 +758,7 @@ export class EventDO extends DurableObject<Env> {
         if (![2, 3, 4, 5].includes(to)) return fail('잘못된 공개 단계입니다.');
         if (to === 3 && (JSON.parse(this.round.featured_json) as string[]).length === 0) return fail('대표 답안을 먼저 선택하세요.');
         st.stage = to as Stage;
+        st.stageAt = Date.now();
         st.page = 0;
         st.sv++;
         this.saveState();
@@ -973,6 +978,28 @@ export class EventDO extends DurableObject<Env> {
     };
   }
 
+  /**
+   * 누적 성적: 마감·무효 아닌 문제 기준(결과 CSV 의 총점과 같은 규칙).
+   * 모두 맞힌 사람이 있으면 그들을, 없으면 가장 많이 맞힌 사람들을 이름순으로.
+   */
+  private standings(): { total: number; score: number; perfect: boolean; count: number; names: string[] } {
+    const total = this.sql.exec<{ c: number }>(`SELECT COUNT(*) AS c FROM rounds WHERE status='closed' AND voided=0`).one().c;
+    const scored = `SELECT x.pid, COUNT(*) AS c FROM results x JOIN rounds r ON r.run=x.run
+                    WHERE x.correct=1 AND r.status='closed' AND r.voided=0 GROUP BY x.pid`;
+    const score = this.sql.exec<{ m: number | null }>(`SELECT MAX(c) AS m FROM (${scored})`).one().m ?? 0;
+    if (!score) return { total, score: 0, perfect: false, count: 0, names: [] };
+    const count = this.sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM (${scored}) WHERE c=?`, score).one().n;
+    const names = this.sql
+      .exec<{ name: string }>(
+        `SELECT p.name FROM (${scored}) s JOIN participants p ON p.pid=s.pid WHERE s.c=? ORDER BY p.name LIMIT ?`,
+        score,
+        STANDINGS_MAX_NAMES,
+      )
+      .toArray()
+      .map((x) => x.name);
+    return { total, score, perfect: score === total, count, names };
+  }
+
   private boardView(): BoardView {
     const st = this.st!;
     const r = this.round;
@@ -1001,6 +1028,7 @@ export class EventDO extends DurableObject<Env> {
           v.answer = { display: q.answerDisplay, explanation: q.explanation };
           v.voided = !!r.voided;
           if (!r.voided) v.tally = { correct: r.correct, wrong: r.total - r.correct };
+          if (st.stage === 4) v.standings = { at: (st.stageAt ?? r.closed_at ?? 0) + STANDINGS_DELAY_MS, ...this.standings() };
         }
         if (st.stage === 5 && !r.voided) {
           const size = LIMITS.winnersPageSize;

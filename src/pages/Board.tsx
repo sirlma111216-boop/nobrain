@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { joinUrlFor, useQr } from '../lib/qr';
 import { api, ApiError } from '../lib/api';
 import { LiveSocket, type SocketStatus } from '../lib/socket';
-import { syncClock, useRemaining } from '../lib/clock';
+import { serverNow, syncClock, useRemaining } from '../lib/clock';
 import type { BoardView } from '../../shared/protocol';
 
 // 16:9 전광판. 읽기 전용 권한이며 서버가 보낸 '현재 공개 단계' 정보만 그린다.
@@ -193,29 +193,95 @@ function Scene({ v, qr, joinUrl, remaining }: { v: BoardView; qr: string; joinUr
       </div>
     );
   }
-  if (v.stage === 4) {
-    return (
-      <div className="b-question">
-        {head}
-        <div className="b-split">
-          {q && <img className="b-img small" src={q.image} alt={q.imageAlt} />}
-          <div className="b-answer">
-            <div className="b-h2">정답</div>
-            <div className="b-ans">{v.answer?.display}</div>
-            {v.tally && (
-              <div className="b-tally">
-                <div className="b-tally-ok"><span>맞힘</span><b>{v.tally.correct}</b>명</div>
-                <div className="b-tally-no"><span>틀림</span><b>{v.tally.wrong}</b>명</div>
-              </div>
-            )}
-            <div className="b-exp">{v.answer?.explanation}</div>
-            {v.voided && <div className="b-void">이 문제는 무효 처리되었습니다</div>}
-          </div>
+  if (v.stage === 4 && v.standings) {
+    const s = v.standings;
+    return <StandingsGate at={s.at} early={<AnswerScene v={v} head={head} />} late={<Standings s={s} head={head} />} />;
+  }
+  if (v.stage === 4) return <AnswerScene v={v} head={head} />;
+  return <WinnersScene v={v} head={head} />;
+}
+
+function AnswerScene({ v, head }: { v: BoardView; head: ReactNode }) {
+  const q = v.question;
+  return (
+    <div className="b-question">
+      {head}
+      <div className="b-split">
+        {q && <img className="b-img small" src={q.image} alt={q.imageAlt} />}
+        <div className="b-answer">
+          <div className="b-h2">정답</div>
+          <div className="b-ans">{v.answer?.display}</div>
+          {v.tally && (
+            <div className="b-tally">
+              <div className="b-tally-ok"><span>맞힘</span><b>{v.tally.correct}</b>명</div>
+              <div className="b-tally-no"><span>틀림</span><b>{v.tally.wrong}</b>명</div>
+            </div>
+          )}
+          <div className="b-exp">{v.answer?.explanation}</div>
+          {v.voided && <div className="b-void">이 문제는 무효 처리되었습니다</div>}
         </div>
       </div>
-    );
-  }
-  // stage 5
+    </div>
+  );
+}
+
+/** 서버 시각 at 전에는 early, 지난 뒤에는 late. 다시 연결돼 늦게 받아도 시각 기준이라 어긋나지 않는다. */
+function StandingsGate({ at, early, late }: { at: number; early: ReactNode; late: ReactNode }) {
+  const [, force] = useState(0);
+  const wait = at - serverNow();
+  useEffect(() => {
+    if (wait <= 0) return;
+    const id = setTimeout(() => force((x) => x + 1), wait + 50);
+    return () => clearTimeout(id);
+  }, [at, wait > 0]);
+  return <>{wait > 0 ? early : late}</>;
+}
+
+/**
+ * 이름 칸을 넘치지 않는 가장 큰 글자 크기(em). 적을수록 크고 많을수록 작다.
+ * 이름 길이가 제각각이라 공식으로 어림한 뒤, 실제로 넘치면 조금씩 줄인다(창 크기가 바뀌어도 em 이라 비율 그대로).
+ */
+function useFitSize(names: string[]) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState(0);
+  const key = names.join('|');
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let s = Math.min(12, 30 / Math.sqrt(Math.max(1, names.length)));
+    el.style.fontSize = s + 'em';
+    while (s > 0.6 && (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1)) {
+      s *= 0.92;
+      el.style.fontSize = s + 'em';
+    }
+    setSize(s);
+  }, [key]);
+  return { ref, size };
+}
+
+function Standings({ s, head }: { s: NonNullable<BoardView['standings']>; head: ReactNode }) {
+  const more = s.count - s.names.length;
+  const fit = useFitSize(s.names);
+  const title = s.score === 0 ? '아직 맞힌 사람이 없습니다' : s.perfect ? `${s.total}문제 모두 맞힌 사람` : `가장 많이 맞힌 사람 (${s.total}문제 중 ${s.score}개)`;
+  return (
+    <div className="b-question">
+      {head}
+      <div className="b-standings">
+        <div className="b-h2">
+          {title} {s.score > 0 && <b>{s.count}명</b>}
+        </div>
+        <div className="b-snames" ref={fit.ref} style={fit.size ? { fontSize: `${fit.size}em` } : undefined}>
+          {s.names.map((n) => (
+            <span key={n}>{n}</span>
+          ))}
+          {more > 0 && <span className="more">외 {more}명</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WinnersScene({ v, head }: { v: BoardView; head: ReactNode }) {
   const w = v.winners;
   return (
     <div className="b-question">

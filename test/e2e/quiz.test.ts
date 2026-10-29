@@ -247,6 +247,11 @@ describe('공개 단계·재채점', () => {
     const b = lastBoard();
     expect(b.answer.display).toBe('3시');
     expect(b.tally).toEqual({ correct: 5, wrong: 1 }); // 학생007 은 안 냈으므로 틀림에 들지 않는다
+    // 5초 뒤 전광판이 바꿔 보여 줄 누적 성적(지금까지 1문제 → 모두 맞힌 5명)
+    expect(b.standings).toMatchObject({ total: 1, score: 1, perfect: true, count: 5 });
+    expect(b.standings.names).toEqual(['학생001', '학생002', '학생003', '학생005', '학생006']);
+    expect(b.standings.at - b.now).toBeGreaterThan(3000);
+    expect(b.standings.at - b.now).toBeLessThanOrEqual(5000);
     expect(b.winners).toBeUndefined();
     expect(b.featured).toBeUndefined();
   });
@@ -257,6 +262,7 @@ describe('공개 단계·재채점', () => {
     const b = lastBoard();
     expect(b.answer).toBeUndefined();
     expect(b.tally).toBeUndefined();
+    expect(b.standings).toBeUndefined();
     expect(b.winners).toBeUndefined();
     expect(b.featured).toBeUndefined();
   });
@@ -581,6 +587,42 @@ describe('문제세트 만들기', () => {
     expect((await h2.post(`/api/host/sets/${sid}/delete`, {})).status).toBe(200);
     expect((await h2.get(`/api/host/sets/${sid}`)).status).toBe(404);
   });
+});
+
+describe('누적 성적', () => {
+  it('모두 맞힌 사람이 없으면 가장 많이 맞힌 사람들을 보여 준다', async () => {
+    const h2 = await hostLogin(base, password);
+    const ev = await Host.create(h2, '누적 시험');
+    const k = await ev.cmd('boardKey');
+    const m = String(k.data.link).match(/k=([0-9A-Z]{6})\.(.+)$/)!;
+    const bh = new Http(base);
+    expect((await bh.post('/api/board/login', { event: m[1], key: m[2] })).status).toBe(200);
+    const msgs: any[] = [];
+    const ws = bh.ws('/ws?role=b', (x: any) => msgs.push(x));
+    const last = () => msgs.filter((x) => x.t === 'board').at(-1);
+    const ppl: Bot[] = [];
+    for (const n of ['가나', '다라', '마바']) {
+      const b = new Bot(base);
+      expect((await b.register(ev.event, 'visitor', n)).status).toBe(200);
+      expect(await b.connect()).toBe(true);
+      ppl.push(b);
+    }
+    // 1번: 가나만 맞힘, 2번: 다라만 맞힘, 마바는 둘 다 틀림
+    for (const right of [0, 1]) {
+      await ev.mustCmd('next');
+      await ev.mustCmd('start');
+      await ev.refresh();
+      const ok = ev.view.question.accepted[0];
+      for (const b of ppl) await b.waitFor((x: Bot) => x.view?.phase === 'open');
+      for (let i = 0; i < 3; i++) expect((await ppl[i].submit(i === right ? ok : '틀린답')).data.status).toBe('accepted');
+      await ev.mustCmd('close');
+    }
+    expect(await until(() => last()?.standings?.total === 2)).toBe(true);
+    expect(last().standings).toMatchObject({ total: 2, score: 1, perfect: false, count: 2, names: ['가나', '다라'] });
+    expect(last().tally).toEqual({ correct: 1, wrong: 2 });
+    for (const b of ppl) b.disconnect();
+    ws.terminate();
+  }, 30000);
 });
 
 describe('연습용 봇', () => {

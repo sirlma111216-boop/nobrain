@@ -196,6 +196,13 @@ body[data-page='board'] { background: #000; overflow: hidden; }
 .b-tally-no { background: rgba(255, 112, 133, .18); color: #ffa3b1; }
 .b-exp { font-size: 3em; color: #dfe2ff; line-height: 1.5; margin-top: .6em; }
 .b-void { font-size: 4em; font-weight: 900; color: #ff9aa8; margin-top: .5em; }
+.b-standings { flex: 1; display: flex; flex-direction: column; align-items: center; padding-top: .5em; min-height: 0; }
+.b-standings .b-h2 { margin-bottom: .4em; text-align: center; }
+.b-standings .b-h2 b { color: var(--accent); margin-left: .3em; }
+/* 글자 크기는 화면에서 이름 수로 정한다(적을수록 크게). 칸 간격도 글자 크기에 비례 */
+.b-snames { flex: 1; min-height: 0; width: 100%; display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: .25em .4em; font-weight: 800; line-height: 1.2; overflow: hidden; }
+.b-snames span { background: rgba(255, 255, 255, .08); border-radius: .25em; padding: .08em .35em; white-space: nowrap; }
+.b-snames .more { background: none; color: #c8cdf5; }
 .b-winners { flex: 1; display: flex; flex-direction: column; align-items: center; padding-top: .5em; min-height: 0; }
 .b-winners .b-h2 { margin-bottom: .3em; }
 /* 정답자 명단: 글자를 줄이지 않고 페이지로 나눈다(한 페이지 30명 = 6열 × 5행) */
