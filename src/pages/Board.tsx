@@ -129,14 +129,7 @@ function Scene({ v, qr, joinUrl, remaining }: { v: BoardView; qr: string; joinUr
       </div>
     );
   }
-  if (v.phase === 'ended') {
-    return (
-      <div className="b-center">
-        <div className="b-title">퀴즈 끝!</div>
-        <div className="b-sub">참여해 주셔서 고맙습니다.</div>
-      </div>
-    );
-  }
+  if (v.phase === 'ended') return <EndScene s={v.standings} />;
   if (v.phase === 'ready') {
     return (
       <div className="b-ready">
@@ -277,6 +270,29 @@ function Standings({ s, head }: { s: NonNullable<BoardView['standings']>; head: 
           {more > 0 && <span className="more">외 {more}명</span>}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** 퀴즈 종료: 최종 성적 + 마무리 인사 */
+function EndScene({ s }: { s: BoardView['standings'] }) {
+  const names = s && s.score > 0 ? (s.perfect ? s.names : s.names.map((n) => `${n}(${s.score}개)`)) : [];
+  const more = s ? s.count - s.names.length : 0;
+  const fit = useFitSize(names);
+  return (
+    <div className="b-end">
+      <div className="b-end-title">퀴즈가 종료되었습니다.</div>
+      <div className="b-end-label">
+        {!s || s.score === 0 ? '맞춘 참여자가 없습니다.' : s.perfect ? '모두 맞춘 참여자 이름 :' : '가장 많이 맞춘 참여자 이름 :'}
+      </div>
+      <div className="b-snames" ref={fit.ref} style={fit.size ? { fontSize: `${fit.size}em` } : undefined}>
+        {names.map((n) => (
+          <span key={n}>{n}</span>
+        ))}
+        {more > 0 && <span className="more">외 {more}명</span>}
+      </div>
+      <div className="b-end-thanks">출제자의 의도를 맞추느라 수고 많으셨습니다!!!</div>
+      <div className="b-end-prize">상품은.... 방송반의 사랑을 드립니다!</div>
     </div>
   );
 }

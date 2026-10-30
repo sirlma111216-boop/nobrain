@@ -52,6 +52,7 @@ export interface BoardView {
   voided?: boolean;
   winners?: { count: number; names: string[]; page: number; pages: number };
   /**
+   * 종료(ended) 화면의 최종 성적이기도 하다(이때 at 은 0).
    * 4 단계에서 at(서버 시각) 이 지나면 전광판이 맞힘/틀림 화면 대신 보여 주는 누적 성적.
    * perfect = 지금까지 낸 문제를 모두 맞힌 사람들, 아니면 가장 많이 맞힌 사람들(score 개). score 0 이면 names 는 비어 있다.
    */

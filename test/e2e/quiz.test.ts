@@ -620,6 +620,10 @@ describe('누적 성적', () => {
     expect(await until(() => last()?.standings?.total === 2)).toBe(true);
     expect(last().standings).toMatchObject({ total: 2, score: 1, perfect: false, count: 2, names: ['가나', '다라'] });
     expect(last().tally).toEqual({ correct: 1, wrong: 2 });
+    // 남은 문제를 건너뛰고 끝내면 종료 화면에 최종 성적이 나온다
+    for (await ev.refresh(); ev.view.phase !== 'ended'; await ev.refresh()) await ev.mustCmd('next');
+    expect(await until(() => last()?.phase === 'ended')).toBe(true);
+    expect(last().standings).toMatchObject({ total: 2, score: 1, perfect: false, names: ['가나', '다라'] });
     for (const b of ppl) b.disconnect();
     ws.terminate();
   }, 30000);

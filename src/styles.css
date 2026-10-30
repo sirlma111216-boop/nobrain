@@ -196,6 +196,12 @@ body[data-page='board'] { background: #000; overflow: hidden; }
 .b-tally-no { background: rgba(255, 112, 133, .18); color: #ffa3b1; }
 .b-exp { font-size: 3em; color: #dfe2ff; line-height: 1.5; margin-top: .6em; }
 .b-void { font-size: 4em; font-weight: 900; color: #ff9aa8; margin-top: .5em; }
+.b-end { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding: 3em 4em 2.5em; gap: 1em; text-align: center; }
+.b-end-title { font-size: 6em; font-weight: 900; color: var(--accent); }
+.b-end-label { font-size: 3em; font-weight: 800; color: #dfe2ff; }
+.b-end .b-snames { width: 100%; }
+.b-end-thanks { font-size: 3.4em; font-weight: 800; }
+.b-end-prize { font-size: 3.4em; font-weight: 900; color: #ffa3b1; }
 .b-standings { flex: 1; display: flex; flex-direction: column; align-items: center; padding-top: .5em; min-height: 0; }
 .b-standings .b-h2 { margin-bottom: .4em; text-align: center; }
 .b-standings .b-h2 b { color: var(--accent); margin-left: .3em; }

@@ -1048,6 +1048,8 @@ export class EventDO extends DurableObject<Env> {
         }
       }
     }
+    // 퀴즈 종료 화면: 최종 성적(모두 맞힌 사람, 없으면 가장 많이 맞힌 사람)을 바로 보여 준다
+    if (st.phase === 'ended') v.standings = { at: 0, ...this.standings() };
     return v;
   }
 
