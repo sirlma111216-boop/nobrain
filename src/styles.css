@@ -312,12 +312,16 @@ body[data-page='board'] { background: #000; overflow: hidden; }
 .p-choice.ok .p-choice-no { color: var(--ok); }
 .p-choice:disabled { opacity: .6; cursor: default; }
 .p-choice.picked:disabled, .p-choice.ok:disabled { opacity: 1; }
+/* OX: 화면을 거의 채우는 큰 버튼 두 개를 양쪽에 놓아 바로 터치하게 한다 */
 .p-oxs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; }
-.p-ox { min-height: 120px; font-size: 64px; font-weight: 900; border-radius: 18px; border: 3px solid var(--line); background: var(--bg); color: var(--muted); }
-.p-ox.O.picked, .p-ox.O.ok { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); }
-.p-ox.X.picked { border-color: var(--err); background: var(--err-bg); color: var(--err); }
-.p-ox.X.ok { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); }
-.p-ox:disabled { opacity: .6; cursor: default; }
+.p-ox { min-height: min(52vh, 420px); font-size: clamp(88px, 30vw, 170px); line-height: 1; font-weight: 900; border-radius: 24px; border: 4px solid var(--line); background: var(--bg); color: var(--muted); touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.p-ox.O { color: var(--ok); border-color: var(--ok); background: var(--ok-bg); }
+.p-ox.X { color: var(--err); border-color: var(--err); background: var(--err-bg); }
+.p-ox.O.picked { background: var(--ok); color: #fff; }
+.p-ox.X.picked { background: var(--err); color: #fff; }
+.solo-main .p-ox { min-height: min(40vh, 320px); font-size: clamp(72px, 18vw, 140px); }
+.p-ox.ok { border-color: var(--ok); background: var(--ok); color: #fff; }
+.p-ox:disabled { opacity: .55; cursor: default; }
 .p-ox.picked:disabled, .p-ox.ok:disabled { opacity: 1; }
 .solo-main .p-choices, .solo-main .p-oxs { max-width: 560px; }
 
