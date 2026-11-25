@@ -14,6 +14,7 @@ import { QUESTION_BY_ID as STATIC_QUESTIONS, type Question } from './quiz/bank';
 import { acceptedKeys, cleanAnswer, normKey } from './quiz/grading';
 import {
   LIMITS,
+  answerLabel,
   type BoardView,
   type HostView,
   type MyAnswer,
@@ -554,11 +555,19 @@ export class EventDO extends DurableObject<Env> {
     if (r.status !== 'open' || Date.now() >= r.ends_at) return { status: 'closed', latest: this.myAnswer(pid, run) };
 
     if (b.text.length > LIMITS.answerMaxRawChars) return { status: 'invalid', message: '답이 너무 깁니다.' };
-    const text = cleanAnswer(b.text);
+    let text = cleanAnswer(b.text);
     if (!text) return { status: 'invalid', message: '답을 입력하세요.' };
     if ([...text].length > LIMITS.answerMaxChars) return { status: 'invalid', message: `답은 ${LIMITS.answerMaxChars}자 이내로 입력하세요.` };
 
     const q = this.qById(r.qid)!;
+    // 객관식은 보기 번호, OX 는 O/X 만 받는다(휴대폰 버튼이 보내는 값). 그 밖의 값은 형식 오류
+    if (q.type === 'choice') {
+      const n = Number(text);
+      if (!/^[1-9]$/.test(text) || n > (q.choices?.length ?? 0)) return { status: 'invalid', message: '보기 번호가 올바르지 않습니다.' };
+    } else if (q.type === 'ox') {
+      text = text.toUpperCase();
+      if (text !== 'O' && text !== 'X') return { status: 'invalid', message: 'O 또는 X 로 답하세요.' };
+    }
     const norm = normKey(text, q.rules);
     const now = Date.now();
     const ex = this.sql
@@ -953,7 +962,8 @@ export class EventDO extends DurableObject<Env> {
           const a = byKey.get(r.run + ':' + p.pid);
           const correct = a ? a.correct === 1 : false;
           if (correct && !r.voided && r.status === 'closed') score++;
-          return a ? { text: a.text, seq: a.seq, versions: a.versions, at: a.accepted_at, correct: a.correct === null ? null : correct } : null;
+          // 객관식 보기 번호·OX 는 사람이 읽을 표기("② 사과")로 내보낸다
+          return a ? { text: answerLabel(this.qById(r.qid), a.text), seq: a.seq, versions: a.versions, at: a.accepted_at, correct: a.correct === null ? null : correct } : null;
         });
         return { pid: p.pid, name: p.name, kind: p.kind, cells, score };
       }),
@@ -964,7 +974,7 @@ export class EventDO extends DurableObject<Env> {
   private playerView(): PlayerView {
     const st = this.st!;
     const r = this.round;
-    return {
+    const v: PlayerView = {
       t: 'state',
       ev: st.code,
       title: st.title,
@@ -976,6 +986,13 @@ export class EventDO extends DurableObject<Env> {
       endsAt: r ? r.ends_at : null,
       now: Date.now(),
     };
+    // 휴대폰이 답 버튼을 그리는 데 필요한 만큼만: 유형과 보기 글(정답·사진 없음). 단답형은 보내지 않는다
+    const q = r ? this.qById(r.qid) : undefined;
+    if (q && q.type && q.type !== 'short') {
+      v.qType = q.type;
+      if (q.type === 'choice') v.choices = (q.choices ?? []).map((c) => c.text);
+    }
+    return v;
   }
 
   /**
@@ -1018,14 +1035,16 @@ export class EventDO extends DurableObject<Env> {
     // 공개 단계에 해당하는 정보만 담는다. 정답·집계는 해당 단계 전에는 전광판에도 보내지 않는다.
     if (r && (st.phase === 'open' || st.phase === 'closed')) {
       const q = this.qById(r.qid)!;
-      v.question = { prompt: q.prompt, image: q.image, imageAlt: q.imageAlt };
+      v.question = { prompt: q.prompt, image: q.image, imageAlt: q.imageAlt, type: q.type ?? 'short', choices: q.type === 'choice' ? q.choices : undefined };
       if (st.phase === 'closed') {
         if (st.stage === 3) {
           const counts = new Map(this.topAnswers(r.run).map((t) => [t.norm, t.count]));
-          v.featured = (JSON.parse(r.featured_json) as string[]).map((n) => ({ text: n, count: counts.get(n) ?? 0 }));
+          v.featured = (JSON.parse(r.featured_json) as string[]).map((n) => ({ text: answerLabel(q, n), count: counts.get(n) ?? 0 }));
         }
         if (st.stage >= 4) {
           v.answer = { display: q.answerDisplay, explanation: q.explanation };
+          if (q.type === 'choice') v.answer.choice = Number(q.accepted[0]) || undefined;
+          if (q.type === 'ox') v.answer.ox = q.accepted[0];
           v.voided = !!r.voided;
           if (!r.voided) v.tally = { correct: r.correct, wrong: r.total - r.correct };
           if (st.stage === 4) v.standings = { at: (st.stageAt ?? r.closed_at ?? 0) + STANDINGS_DELAY_MS, ...this.standings() };
@@ -1098,6 +1117,8 @@ export class EventDO extends DurableObject<Env> {
     if (q) {
       v.question = {
         id: q.id,
+        type: q.type ?? 'short',
+        choices: q.type === 'choice' ? q.choices : undefined,
         prompt: q.prompt,
         image: q.image,
         answerDisplay: q.answerDisplay,

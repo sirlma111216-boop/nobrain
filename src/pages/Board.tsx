@@ -3,7 +3,7 @@ import { joinUrlFor, useQr } from '../lib/qr';
 import { api, ApiError } from '../lib/api';
 import { LiveSocket, type SocketStatus } from '../lib/socket';
 import { serverNow, syncClock, useRemaining } from '../lib/clock';
-import type { BoardView } from '../../shared/protocol';
+import { CIRCLED, type BoardView } from '../../shared/protocol';
 
 // 16:9 전광판. 읽기 전용 권한이며 서버가 보낸 '현재 공개 단계' 정보만 그린다.
 
@@ -156,9 +156,11 @@ function Scene({ v, qr, joinUrl, remaining }: { v: BoardView; qr: string; joinUr
     return (
       <div className="b-question">
         {head}
-        <div className="b-qbody">
-          {q && <img className="b-img" src={q.image} alt={q.imageAlt} />}
+        <div className={'b-qbody' + (q?.image ? '' : ' noimg') + (q?.type === 'choice' ? ' has-choices' : '')}>
+          {q?.image && <img className="b-img" src={q.image} alt={q.imageAlt} />}
           {q?.prompt && <div className="b-prompt">{q.prompt}</div>}
+          {q?.type === 'choice' && <Choices choices={q.choices ?? []} />}
+          {q?.type === 'ox' && <OxMarks />}
         </div>
         {v.phase === 'closed' && <div className="b-stamp">답안 접수 마감</div>}
         <div className="b-foot">{joinUrl.replace(/^https?:\/\//, '')} · 행사 코드 {v.ev}</div>
@@ -171,7 +173,7 @@ function Scene({ v, qr, joinUrl, remaining }: { v: BoardView; qr: string; joinUr
       <div className="b-question">
         {head}
         <div className="b-split">
-          {q && <img className="b-img small" src={q.image} alt={q.imageAlt} />}
+          {q?.image && <img className="b-img small" src={q.image} alt={q.imageAlt} />}
           <div className="b-featured">
             <div className="b-h2">여러분이 낸 답</div>
             {(v.featured ?? []).map((f) => (
@@ -194,16 +196,44 @@ function Scene({ v, qr, joinUrl, remaining }: { v: BoardView; qr: string; joinUr
   return <WinnersScene v={v} head={head} />;
 }
 
+/** 객관식 보기(전광판). correct 가 있으면 그 보기를 강조한다 */
+function Choices({ choices, correct }: { choices: NonNullable<BoardView['question']>['choices'] & object; correct?: number }) {
+  const withImg = choices.some((c) => c.image);
+  return (
+    <div className={'b-choices' + (withImg ? ' with-img' : '') + (correct ? ' revealed' : '')}>
+      {choices.map((c, k) => (
+        <div key={k} className={'b-choice' + (correct === k + 1 ? ' ok' : '')}>
+          <span className="b-choice-no">{CIRCLED[k]}</span>
+          {c.image && <img src={c.image} alt="" />}
+          {c.text && <span className="b-choice-t">{c.text}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** OX 문제: 답을 받는 동안 O·X 둘 다, 정답 공개 때는 정답만 강조 */
+function OxMarks({ correct }: { correct?: string }) {
+  return (
+    <div className={'b-oxs' + (correct ? ' revealed' : '')}>
+      {(['O', 'X'] as const).map((v) => (
+        <div key={v} className={'b-ox ' + v + (correct === v ? ' ok' : '')}>{v}</div>
+      ))}
+    </div>
+  );
+}
+
 function AnswerScene({ v, head }: { v: BoardView; head: ReactNode }) {
   const q = v.question;
+  const left = q?.type === 'choice' ? <Choices choices={q.choices ?? []} correct={v.answer?.choice} /> : q?.type === 'ox' ? <OxMarks correct={v.answer?.ox} /> : q?.image ? <img className="b-img small" src={q.image} alt={q.imageAlt} /> : null;
   return (
     <div className="b-question">
       {head}
       <div className="b-split">
-        {q && <img className="b-img small" src={q.image} alt={q.imageAlt} />}
+        {left}
         <div className="b-answer">
           <div className="b-h2">정답</div>
-          <div className="b-ans">{v.answer?.display}</div>
+          <div className={'b-ans' + (q?.type === 'choice' ? ' choice' : '')}>{v.answer?.display}</div>
           {v.tally && (
             <div className="b-tally">
               <div className="b-tally-ok"><span>맞힘</span><b>{v.tally.correct}</b>명</div>

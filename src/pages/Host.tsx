@@ -3,7 +3,9 @@ import { api, ApiError, rid, store } from '../lib/api';
 import { LiveSocket, type SocketStatus } from '../lib/socket';
 import { syncClock, useRemaining } from '../lib/clock';
 import { joinUrlFor, useQr } from '../lib/qr';
-import { JOIN_KINDS, type HostView } from '../../shared/protocol';
+import { CIRCLED, JOIN_KINDS, answerLabel, type HostView } from '../../shared/protocol';
+
+const TYPE_KO: Record<string, string> = { short: '단답형', choice: '객관식', ox: 'OX' };
 
 const STAGE_LABEL: Record<number, string> = {
   0: '-',
@@ -127,9 +129,9 @@ function EventPicker({ onPick }: { onPick: (ev: string) => void }) {
   return (
     <div className="h-wrap narrow">
       <h1>행사 선택</h1>
-      <a className="h-btn" href="/host/sets">📚 문제세트 보기 · 혼자 풀기</a>
+      <a className="h-btn" href="/host/sets">📚 문제 만들기 및 수정, 혼자풀기</a>
       <section className="h-card">
-        <h2>새 행사 만들기</h2>
+        <h2>행사 진행하기</h2>
         <input className="h-input" value={title} maxLength={40} onChange={(e) => setTitle(e.target.value)} placeholder="행사 이름" />
         <select className="h-input" value={setId} onChange={(e) => setSetId(e.target.value)} aria-label="문제세트">
           {sets.map((s) => (
@@ -269,7 +271,7 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
     <div className="h-wrap">
       <header className="h-head">
         <button className="h-btn small" onClick={onBack}>← 행사 선택</button>
-        <a className="h-btn small" href="/host/sets" target="_blank" rel="noopener">문제세트 · 혼자 풀기</a>
+        <a className="h-btn small" href="/host/sets" target="_blank" rel="noopener">문제 만들기 및 수정, 혼자풀기</a>
         <h1>{v.title} <span className="h-code">{v.ev}</span></h1>
         <span className={'h-conn ' + conn}>{conn === 'open' ? '실시간 연결' : '다시 연결 중'}</span>
       </header>
@@ -298,12 +300,26 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
         </h2>
         {v.question && ph !== 'lobby' && ph !== 'ended' && (
           <div className="h-q">
-            <img src={v.question.image} alt="" />
+            {v.question.image ? <img src={v.question.image} alt="" /> : <div className="h-q-noimg">{TYPE_KO[v.question.type]}</div>}
             <div>
               <div className="h-q-prompt">{v.question.prompt || '(사진 문제)'}</div>
-              <div className="h-q-ans">정답: <b>{v.question.answerDisplay}</b> · 인정: {[...v.question.accepted, ...v.question.extra].join(', ')}</div>
+              {v.question.type === 'choice' && (
+                <div className="h-q-meta">
+                  {(v.question.choices ?? []).map((c, k) => (
+                    <span key={k} className={'h-q-choice' + (v.question!.accepted.includes(String(k + 1)) ? ' ok' : '')}>
+                      {CIRCLED[k]} {c.text || '(사진)'}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="h-q-ans">
+                {TYPE_KO[v.question.type]} · 정답: <b>{v.question.answerDisplay}</b>
+                {v.question.type === 'short' && <> · 인정: {[...v.question.accepted, ...v.question.extra].join(', ')}</>}
+                {v.question.type !== 'short' && v.question.extra.length > 0 && <> · 추가 인정: {v.question.extra.map((e) => answerLabel(v.question, e)).join(', ')}</>}
+              </div>
               <div className="h-q-meta">
-                제한 {v.question.timeLimitSec}초 · 띄어쓰기 {v.question.rules.ignoreSpaces ? '무시' : '구분'} · 영문 대소문자 {v.question.rules.caseInsensitive ? '무시' : '구분'}
+                제한 {v.question.timeLimitSec}초
+                {v.question.type === 'short' && <> · 띄어쓰기 {v.question.rules.ignoreSpaces ? '무시' : '구분'} · 영문 대소문자 {v.question.rules.caseInsensitive ? '무시' : '구분'}</>}
               </div>
             </div>
           </div>
@@ -353,7 +369,7 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
               {(v.top ?? []).map((t) => (
                 <tr key={t.norm} className={t.correct ? 'ok' : ''}>
                   <td><input type="checkbox" checked={featured.includes(t.norm)} onChange={() => toggleFeatured(t.norm)} /></td>
-                  <td className="h-ans">{t.norm}</td>
+                  <td className="h-ans">{answerLabel(v.question, t.norm)}</td>
                   <td>{t.count}</td>
                   <td>{t.correct ? '정답' : '오답'}</td>
                   <td>
@@ -370,10 +386,13 @@ function Dashboard({ event, devTools, onBack, onAuthLost }: { event: string; dev
           <div className="h-actions">
             <button className="h-btn" disabled={!!busy} onClick={() => cmd('feature', { norms: featured }, '대표 답안 저장')}>선택한 대표 답안 저장 ({featured.length})</button>
           </div>
-          <div className="h-row">
-            <input className="h-input" value={acceptText} maxLength={30} onChange={(e) => setAcceptText(e.target.value)} placeholder="인정 답안 직접 추가 (예: 3 시)" />
-            <button className="h-btn" disabled={!acceptText.trim() || !!busy} onClick={() => cmd('accept', { text: acceptText, run: v.run }, '인정 답안 추가·재채점').then(() => setAcceptText(''))}>추가 후 재채점</button>
-          </div>
+          {(v.question?.type ?? 'short') === 'short' && (
+            <div className="h-row">
+              <input className="h-input" value={acceptText} maxLength={30} onChange={(e) => setAcceptText(e.target.value)} placeholder="인정 답안 직접 추가 (예: 3 시)" />
+              <button className="h-btn" disabled={!acceptText.trim() || !!busy} onClick={() => cmd('accept', { text: acceptText, run: v.run }, '인정 답안 추가·재채점').then(() => setAcceptText(''))}>추가 후 재채점</button>
+            </div>
+          )}
+          {(v.question?.type ?? 'short') !== 'short' && <p className="h-hint">객관식·OX 는 위 표에서 다른 보기를 "정답 인정"하면 복수 정답으로 다시 채점합니다.</p>}
           <div className="h-actions">
             <B name="void" args={{ run: v.run, voided: !v.voided }} label={v.voided ? '무효 해제' : '이 문제 무효 처리'} on kind="warn" />
           </div>

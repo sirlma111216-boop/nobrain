@@ -10,6 +10,36 @@ export type Phase = 'lobby' | 'ready' | 'open' | 'closed' | 'ended';
  */
 export type Stage = 1 | 2 | 3 | 4 | 5;
 
+/**
+ * 문제 유형. short = 단답형(글자 입력), choice = 객관식(보기 번호 1~4 를 답으로 냄), ox = O/X.
+ * 저장된 문제에 type 이 없으면 short 로 본다(유형을 추가하기 전에 만든 문제).
+ */
+export type QuestionType = 'short' | 'choice' | 'ox';
+
+/** 객관식 보기. 글·사진 중 하나 이상. 사진은 '' 이면 없음 */
+export interface Choice {
+  text: string;
+  image: string;
+}
+
+export const CIRCLED = ['①', '②', '③', '④'] as const;
+export const MAX_CHOICES = 4;
+
+/** 보기 번호(1~4)를 "② 사과" 처럼 표시. 보기 글이 없으면 번호만 */
+export function choiceLabel(choices: { text: string }[] | undefined, no: number): string {
+  const c = choices?.[no - 1];
+  const mark = CIRCLED[no - 1] ?? String(no);
+  return c?.text ? `${mark} ${c.text}` : mark;
+}
+
+/** 접수된 답(서버 비교 기준 값)을 사람이 읽을 표기로. 단답형은 그대로 */
+export function answerLabel(q: { type?: QuestionType; choices?: { text: string }[] } | undefined, text: string): string {
+  if (!q) return text;
+  if (q.type === 'choice' && /^[1-9]$/.test(text)) return choiceLabel(q.choices, Number(text));
+  if (q.type === 'ox') return text.toUpperCase();
+  return text;
+}
+
 /** 참가자 본인의 서버 접수 답안 */
 export interface MyAnswer {
   qid: string;
@@ -31,6 +61,8 @@ export interface PlayerView {
   run: number; // 진행 버전(문제를 시작할 때마다 증가). 0이면 진행 중인 문제 없음
   endsAt: number | null;
   now: number; // 서버 시각(기기 시계 보정용)
+  qType?: QuestionType; // 진행 중인 문제의 유형(open·closed 일 때만). 없으면 단답형
+  choices?: string[]; // 객관식 보기 글(번호 순). 휴대폰에서 버튼을 그리는 데만 쓴다(정답 정보 없음)
   me?: MyAnswer | null; // 연결 직후·재동기화 때만 포함
 }
 
@@ -45,9 +77,10 @@ export interface BoardView {
   run: number;
   endsAt: number | null;
   now: number;
-  question?: { prompt: string; image: string; imageAlt: string };
+  question?: { prompt: string; image: string; imageAlt: string; type: QuestionType; choices?: Choice[] };
   featured?: { text: string; count: number }[];
-  answer?: { display: string; explanation: string };
+  /** choice = 정답 보기 번호(1~4, 객관식만). ox = 'O' | 'X' (OX 만) */
+  answer?: { display: string; explanation: string; choice?: number; ox?: string };
   tally?: { correct: number; wrong: number }; // 4 단계부터. wrong = 냈지만 틀린 사람(안 낸 사람 제외)
   voided?: boolean;
   winners?: { count: number; names: string[]; page: number; pages: number };
@@ -97,6 +130,8 @@ export interface HostView {
   submitted: number; // 현재 문제 제출 인원
   question?: {
     id: string;
+    type: QuestionType;
+    choices?: Choice[];
     prompt: string;
     image: string;
     answerDisplay: string;

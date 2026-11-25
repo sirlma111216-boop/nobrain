@@ -3,6 +3,7 @@ import { cleanAnswer, isCorrect, normKey } from '../../worker/quiz/grading';
 import { existsSync } from 'node:fs';
 import { QUESTIONS, QUESTION_SETS, ALL_QUESTIONS } from '../../worker/quiz/bank';
 import { isCorrect as ok2 } from '../../worker/quiz/grading';
+import { CIRCLED, answerLabel, choiceLabel } from '../../shared/protocol';
 
 const loose = { ignoreSpaces: true, caseInsensitive: true };
 const strict = { ignoreSpaces: false, caseInsensitive: false };
@@ -57,8 +58,14 @@ describe('문제세트', () => {
     for (const set of QUESTION_SETS) {
       expect(set.questions.length).toBeGreaterThan(0);
       for (const q of set.questions) {
-        expect(existsSync('public' + q.image), q.id + ' 그림 없음 ' + q.image).toBe(true);
-        expect(q.accepted).toContain(q.answerDisplay);
+        if (q.image) expect(existsSync('public' + q.image), q.id + ' 그림 없음 ' + q.image).toBe(true);
+        else expect(q.prompt, q.id + ' 사진도 질문 글도 없음').not.toBe('');
+        if (q.type === 'choice') {
+          expect((q.choices ?? []).length).toBeGreaterThanOrEqual(2);
+          expect(Number(q.accepted[0])).toBeLessThanOrEqual(q.choices!.length);
+          expect(q.answerDisplay.startsWith(CIRCLED[Number(q.accepted[0]) - 1])).toBe(true);
+        } else if (q.type === 'ox') expect(['O', 'X']).toContain(q.accepted[0]);
+        else expect(q.accepted).toContain(q.answerDisplay);
         for (const a of q.accepted) expect(ok2(a, q.accepted, q.rules), q.id + ' ' + a).toBe(true);
         for (const d of q.decoys ?? []) expect(ok2(d, q.accepted, q.rules), q.id + ' 오답예시가 정답으로 채점됨: ' + d).toBe(false);
       }
@@ -84,5 +91,57 @@ describe('문제 입력 검증', () => {
     expect(validateQuestion({ ...base, answerDisplay: '  ' }).ok).toBe(false);
     expect(validateQuestion({ ...base, answerDisplay: '가'.repeat(31) }).ok).toBe(false);
     expect(validateQuestion({ ...base, timeLimitSec: 3 }).ok).toBe(false);
+  });
+  it('사진 없이 질문 글만으로 단답형을 만들 수 있고, 둘 다 없으면 거부한다', () => {
+    const v = validateQuestion({ ...base, imageId: '', prompt: '무지개 색은 몇 가지?' });
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(v.q).toMatchObject({ type: 'short', imageId: '', prompt: '무지개 색은 몇 가지?' });
+    expect(validateQuestion({ ...base, imageId: '', prompt: ' ' }).ok).toBe(false);
+  });
+  it('객관식: 빈 보기를 빼고 번호를 다시 매기며, 정답 번호·오답 번호를 만든다', () => {
+    const v = validateQuestion({
+      type: 'choice',
+      imageId: '',
+      prompt: '1년은 몇 달?',
+      choices: [{ text: '10달' }, { text: '' }, { text: '12달', imageId: 'c'.repeat(32) }, { text: '13달' }],
+      correct: 2,
+    });
+    expect(v.ok).toBe(true);
+    if (!v.ok) return;
+    expect(v.q.type).toBe('choice');
+    expect(v.q.choices).toEqual([
+      { text: '10달', imageId: '' },
+      { text: '12달', imageId: 'c'.repeat(32) },
+      { text: '13달', imageId: '' },
+    ]);
+    expect(v.q.accepted).toEqual(['2']);
+    expect(v.q.answerDisplay).toBe('② 12달');
+    expect(v.q.decoys).toEqual(['1', '3']);
+    // 사진만 있는 보기도 보기로 친다. 정답 표시는 번호만
+    const img = validateQuestion({ type: 'choice', prompt: 'q', choices: [{ imageId: 'a'.repeat(32) }, { imageId: 'b'.repeat(32) }], correct: 1 });
+    expect(img.ok && img.q.answerDisplay).toBe('②');
+    // 보기 1개 · 정답이 빈 보기 · 정답 미선택은 거부
+    expect(validateQuestion({ type: 'choice', prompt: 'q', choices: [{ text: '하나' }], correct: 0 }).ok).toBe(false);
+    expect(validateQuestion({ type: 'choice', prompt: 'q', choices: [{ text: '하나' }, { text: '' }, { text: '셋' }], correct: 1 }).ok).toBe(false);
+    expect(validateQuestion({ type: 'choice', prompt: 'q', choices: [{ text: '하나' }, { text: '둘' }] }).ok).toBe(false);
+  });
+  it('OX: 정답은 O 또는 X 만', () => {
+    const v = validateQuestion({ type: 'ox', prompt: '지구는 둥글다', answer: 'o' });
+    expect(v.ok && v.q).toMatchObject({ type: 'ox', answerDisplay: 'O', accepted: ['O'], decoys: ['X'] });
+    expect(validateQuestion({ type: 'ox', prompt: '지구는 둥글다', answer: '네' }).ok).toBe(false);
+    // 채점 규칙(대소문자 구분)으로 'O' 만 정답. 서버는 접수 때 대문자로 바꾼다
+    if (v.ok) expect(ok2('X', v.q.accepted, v.q.rules)).toBe(false);
+  });
+});
+
+describe('답 표기', () => {
+  it('보기 번호 → "② 글", 글이 없으면 번호만, 단답형은 그대로', () => {
+    const choices = [{ text: '사과' }, { text: '' }];
+    expect(choiceLabel(choices, 1)).toBe('① 사과');
+    expect(choiceLabel(choices, 2)).toBe('②');
+    expect(answerLabel({ type: 'choice', choices }, '1')).toBe('① 사과');
+    expect(answerLabel({ type: 'ox' }, 'x')).toBe('X');
+    expect(answerLabel({ type: 'short' }, '3시')).toBe('3시');
+    expect(answerLabel(undefined, '3시')).toBe('3시');
   });
 });

@@ -3,7 +3,7 @@ import { api, ApiError, rid, store } from '../lib/api';
 import { LiveSocket, type SocketStatus } from '../lib/socket';
 import { syncClock, useRemaining } from '../lib/clock';
 import type { MyAnswer, PlayerView, SubmitResult } from '../../shared/protocol';
-import { JOIN_KINDS, LIMITS, NAME_MAX_CHARS, cleanName, type JoinKind } from '../../shared/protocol';
+import { CIRCLED, JOIN_KINDS, LIMITS, NAME_MAX_CHARS, answerLabel, cleanName, type JoinKind } from '../../shared/protocol';
 
 interface Me {
   name: string;
@@ -324,10 +324,11 @@ function Game({ me, onLeave }: { me: Me; onLeave: (msg: string) => void }) {
     }
   };
 
-  const submit = () => {
+  /** 단답형은 입력 칸의 글을, 객관식·OX 는 누른 버튼 값(보기 번호 '1'~'4' / 'O'·'X')을 낸다 */
+  const submit = (value: string = draft) => {
     const v = viewRef.current;
     if (!v || v.phase !== 'open' || !v.qid) return;
-    const text = draft.normalize('NFKC').replace(/\s+/g, ' ').trim();
+    const text = value.normalize('NFKC').replace(/\s+/g, ' ').trim();
     if (!text) return setSend({ kind: 'error', msg: '답을 입력하세요.' });
     if ([...text].length > LIMITS.answerMaxChars) return setSend({ kind: 'error', msg: `답은 ${LIMITS.answerMaxChars}자 이내로 입력하세요.` });
     if (!pendingRef.current && confirmedRef.current?.text === text) return setSend({ kind: 'accepted' });
@@ -368,6 +369,15 @@ function Game({ me, onLeave }: { me: Me; onLeave: (msg: string) => void }) {
 
   const open = view.phase === 'open' && !timeUp;
   const changed = confirmed ? confirmed.text !== draft.normalize('NFKC').replace(/\s+/g, ' ').trim() : draft.trim() !== '';
+  const qType = view.qType ?? 'short';
+  const qMeta = { type: qType, choices: (view.choices ?? []).map((text) => ({ text })) };
+  /** 버튼형 문제: 서버에 접수된 답(없으면 보내는 중인 답)이 이 값이면 강조 */
+  const pickedValue = pendingRef.current?.text ?? confirmed?.text ?? '';
+  const pickBtn = (value: string) => {
+    if (!open || send.kind === 'sending') return;
+    setDraft(value);
+    submit(value);
+  };
 
   return (
     <div className="p-wrap">
@@ -399,35 +409,61 @@ function Game({ me, onLeave }: { me: Me; onLeave: (msg: string) => void }) {
               {view.phase === 'closed' ? '마감' : timeUp ? '마감 중' : `${remaining}초`}
             </div>
           </div>
-          <input
-            className="p-input answer"
-            value={draft}
-            disabled={!open}
-            maxLength={LIMITS.answerMaxChars + 10}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKey}
-            placeholder={open ? '정답을 입력하세요' : '입력이 닫혔습니다'}
-            autoComplete="off"
-            autoCorrect="off"
-            spellCheck={false}
-            enterKeyHint="send"
-          />
-          <button className="p-btn" disabled={!open || send.kind === 'sending'} onClick={submit}>
-            {!open ? '마감됨' : send.kind === 'sending' ? '전송 중…' : confirmed ? '답 고쳐서 다시 제출' : '제출'}
-          </button>
+          {qType === 'choice' && (
+            <div className="p-choices" role="group" aria-label="보기">
+              {(view.choices ?? []).map((text, k) => {
+                const value = String(k + 1);
+                return (
+                  <button key={k} type="button" className={'p-choice' + (pickedValue === value ? ' picked' : '')} disabled={!open || send.kind === 'sending'} onClick={() => pickBtn(value)}>
+                    <span className="p-choice-no">{CIRCLED[k]}</span>
+                    {text && <span className="p-choice-t">{text}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {qType === 'ox' && (
+            <div className="p-oxs" role="group" aria-label="O 또는 X">
+              {(['O', 'X'] as const).map((v) => (
+                <button key={v} type="button" className={'p-ox ' + v + (pickedValue === v ? ' picked' : '')} disabled={!open || send.kind === 'sending'} onClick={() => pickBtn(v)}>
+                  {v}
+                </button>
+              ))}
+            </div>
+          )}
+          {qType === 'short' && (
+            <>
+              <input
+                className="p-input answer"
+                value={draft}
+                disabled={!open}
+                maxLength={LIMITS.answerMaxChars + 10}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={onKey}
+                placeholder={open ? '정답을 입력하세요' : '입력이 닫혔습니다'}
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="send"
+              />
+              <button className="p-btn" disabled={!open || send.kind === 'sending'} onClick={() => submit()}>
+                {!open ? '마감됨' : send.kind === 'sending' ? '전송 중…' : confirmed ? '답 고쳐서 다시 제출' : '제출'}
+              </button>
+            </>
+          )}
           <StatusLine send={send} />
           <div className="p-accepted">
             <span className="lbl">서버에 접수된 내 답</span>
             {confirmed ? (
               <span className="val">
-                “{confirmed.text}” <small>{new Date(confirmed.at).toLocaleTimeString('ko-KR')}</small>
+                “{answerLabel(qMeta, confirmed.text)}” <small>{new Date(confirmed.at).toLocaleTimeString('ko-KR')}</small>
               </span>
             ) : (
               <span className="val none">아직 없음</span>
             )}
-            {open && confirmed && changed && <span className="p-diff">입력 칸의 답은 아직 제출하지 않았습니다.</span>}
+            {open && qType === 'short' && confirmed && changed && <span className="p-diff">입력 칸의 답은 아직 제출하지 않았습니다.</span>}
           </div>
-          {open && <p className="p-hint">마감 전까지 몇 번이든 고쳐 낼 수 있어요. 마지막으로 접수된 답만 채점합니다.</p>}
+          {open && <p className="p-hint">{qType === 'short' ? '마감 전까지 몇 번이든 고쳐 낼 수 있어요.' : '마감 전까지 다른 버튼을 눌러 바꿀 수 있어요.'} 마지막으로 접수된 답만 채점합니다.</p>}
         </main>
       )}
       <footer className="p-foot">

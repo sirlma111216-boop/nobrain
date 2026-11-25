@@ -99,13 +99,18 @@ export class LibraryDO extends DurableObject<Env> {
   /** 문제 추가(qid 없음) 또는 수정 */
   saveQuestion(setId: string, qid: string | null, input: QuestionInput): { ok: true; question: Question } | { ok: false; message: string } {
     if (!this.sql.exec(`SELECT 1 FROM sets WHERE id=?`, setId).toArray().length) return { ok: false, message: '세트를 찾을 수 없습니다.' };
-    if (!this.sql.exec(`SELECT 1 FROM media WHERE id=?`, input.imageId).toArray().length) return { ok: false, message: '사진을 다시 올려 주세요.' };
+    // 문제 사진·보기 사진은 모두 올라와 있어야 한다
+    const mediaIds = [input.imageId, ...input.choices.map((c) => c.imageId)].filter(Boolean);
+    for (const m of mediaIds) {
+      if (!this.sql.exec(`SELECT 1 FROM media WHERE id=?`, m).toArray().length) return { ok: false, message: '사진을 다시 올려 주세요.' };
+    }
     const id = qid ?? rid('lq-');
     const question: Question = {
       id,
+      type: input.type,
       prompt: input.prompt,
-      image: `/api/media/${input.imageId}`,
-      imageAlt: input.prompt || '문제 사진',
+      image: input.imageId ? `/api/media/${input.imageId}` : '',
+      imageAlt: input.imageId ? input.prompt || '문제 사진' : '',
       timeLimitSec: input.timeLimitSec,
       answerDisplay: input.answerDisplay,
       accepted: input.accepted,
@@ -113,6 +118,7 @@ export class LibraryDO extends DurableObject<Env> {
       rules: input.rules,
       decoys: input.decoys,
     };
+    if (input.type === 'choice') question.choices = input.choices.map((c) => ({ text: c.text, image: c.imageId ? `/api/media/${c.imageId}` : '' }));
     const now = Date.now();
     if (qid) {
       const w = this.sql.exec(`UPDATE questions SET data=?, updated_at=? WHERE id=? AND set_id=?`, JSON.stringify(question), now, qid, setId).rowsWritten;

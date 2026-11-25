@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { api, ApiError } from '../lib/api';
 import { HostLogin } from './Host';
+import { CIRCLED, MAX_CHOICES, answerLabel, type Choice, type QuestionType } from '../../shared/protocol';
+
+export const TYPE_LABEL: Record<QuestionType, string> = { short: '단답형', choice: '객관식', ox: 'OX' };
 
 interface SetInfo {
   id: string;
@@ -12,6 +15,8 @@ interface SetInfo {
 }
 interface Q {
   id: string;
+  type?: QuestionType;
+  choices?: Choice[];
   prompt: string;
   image: string;
   imageAlt: string;
@@ -111,7 +116,7 @@ export default function HostSets() {
               {s.title} <small>· {s.count}문제</small>
             </button>
           ))}
-          {mine.length === 0 && <span className="h-hint">아직 만든 세트가 없습니다.</span>}
+          {mine.length === 0 && <span className="h-hint">아직 만든 세트가 없습니다. 유형별 예시는 아래 "문제 유형 예시"에서 볼 수 있습니다.</span>}
         </div>
         <div className="h-row">
           <input className="h-input" value={newTitle} maxLength={40} onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && newTitle.trim() && create()} placeholder="새 세트 이름 (예: 축제 본행사)" />
@@ -192,8 +197,14 @@ async function uploadImage(file: File): Promise<string> {
 
 const lines = (s: string) => s.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
 
+interface ChoiceDraft {
+  text: string;
+  imageId: string;
+  imageUrl: string;
+}
 interface Draft {
   qid: string | null;
+  type: QuestionType;
   imageId: string;
   imageUrl: string;
   answerDisplay: string;
@@ -204,8 +215,59 @@ interface Draft {
   ignoreSpaces: boolean;
   caseInsensitive: boolean;
   decoys: string;
+  choices: ChoiceDraft[]; // 항상 4칸. 비운 칸은 저장 때 빠진다
+  correct: number; // 정답 보기 칸(0~3). -1 = 아직 안 고름
+  ox: 'O' | 'X';
 }
-const emptyDraft = (): Draft => ({ qid: null, imageId: '', imageUrl: '', answerDisplay: '', accepted: '', prompt: '', explanation: '', timeLimitSec: 20, ignoreSpaces: true, caseInsensitive: true, decoys: '' });
+const emptyChoices = (): ChoiceDraft[] => Array.from({ length: MAX_CHOICES }, () => ({ text: '', imageId: '', imageUrl: '' }));
+const emptyDraft = (type: QuestionType = 'short'): Draft => ({
+  qid: null,
+  type,
+  imageId: '',
+  imageUrl: '',
+  answerDisplay: '',
+  accepted: '',
+  prompt: '',
+  explanation: '',
+  timeLimitSec: 20,
+  ignoreSpaces: true,
+  caseInsensitive: true,
+  decoys: '',
+  choices: emptyChoices(),
+  correct: -1,
+  ox: 'O',
+});
+const mediaIdOf = (url: string) => (url.startsWith('/api/media/') ? url.split('/').pop() ?? '' : '');
+
+/** 저장된 문제를 편집 칸으로 */
+function draftFrom(q: Q): Draft {
+  const type = q.type ?? 'short';
+  const choices = emptyChoices();
+  (q.choices ?? []).slice(0, MAX_CHOICES).forEach((c, i) => (choices[i] = { text: c.text, imageId: mediaIdOf(c.image), imageUrl: c.image }));
+  return {
+    qid: q.id,
+    type,
+    imageId: mediaIdOf(q.image),
+    imageUrl: q.image,
+    answerDisplay: type === 'short' ? q.answerDisplay : '',
+    accepted: type === 'short' ? q.accepted.filter((a) => a !== q.answerDisplay).join('\n') : '',
+    prompt: q.prompt,
+    explanation: q.explanation,
+    timeLimitSec: q.timeLimitSec,
+    ignoreSpaces: q.rules.ignoreSpaces,
+    caseInsensitive: q.rules.caseInsensitive,
+    decoys: type === 'short' ? (q.decoys ?? []).join('\n') : '',
+    choices,
+    correct: type === 'choice' ? (Number(q.accepted[0]) || 1) - 1 : -1,
+    ox: type === 'ox' && q.accepted[0] === 'X' ? 'X' : 'O',
+  };
+}
+
+const PROMPT_PLACEHOLDER: Record<QuestionType, string> = {
+  short: '예: 이 과자의 이름은?',
+  choice: '예: 다음 중 우리 학교 교화는?',
+  ox: '예: 우리 학교는 1960년에 개교했다',
+};
 
 function QuestionEditor({ setId, draft, setDraft, onSaved }: { setId: string; draft: Draft; setDraft: (d: Draft) => void; onSaved: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -213,6 +275,8 @@ function QuestionEditor({ setId, draft, setDraft, onSaved }: { setId: string; dr
   const [drag, setDrag] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const answerRef = useRef<HTMLInputElement>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
 
   const takeFile = async (f: File | null | undefined) => {
     if (!f) return;
@@ -220,7 +284,7 @@ function QuestionEditor({ setId, draft, setDraft, onSaved }: { setId: string; dr
     setBusy('사진 올리는 중…');
     try {
       const id = await uploadImage(f);
-      setDraft({ ...draft, imageId: id, imageUrl: `/api/media/${id}` });
+      setDraft({ ...draftRef.current, imageId: id, imageUrl: `/api/media/${id}` });
       setTimeout(() => answerRef.current?.focus(), 0);
     } catch (e) {
       setErr((e as Error).message);
@@ -229,7 +293,23 @@ function QuestionEditor({ setId, draft, setDraft, onSaved }: { setId: string; dr
     }
   };
 
-  // 클립보드 사진 붙여넣기(Ctrl+V)
+  /** 보기 사진(객관식 보기를 그림으로 제시할 때) */
+  const takeChoiceFile = async (i: number, f: File | null | undefined) => {
+    if (!f) return;
+    setErr('');
+    setBusy(`${CIRCLED[i]} 보기 사진 올리는 중…`);
+    try {
+      const id = await uploadImage(f);
+      const choices = draftRef.current.choices.map((c, k) => (k === i ? { ...c, imageId: id, imageUrl: `/api/media/${id}` } : c));
+      setDraft({ ...draftRef.current, choices });
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // 클립보드 사진 붙여넣기(Ctrl+V) → 문제 사진
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const f = [...(e.clipboardData?.files ?? [])].find((x) => x.type.startsWith('image/'));
@@ -246,19 +326,28 @@ function QuestionEditor({ setId, draft, setDraft, onSaved }: { setId: string; dr
     setErr('');
     setBusy('저장 중…');
     try {
-      const body = {
+      const body: Record<string, unknown> = {
+        type: draft.type,
         imageId: draft.imageId,
-        answerDisplay: draft.answerDisplay,
-        accepted: lines(draft.accepted),
         prompt: draft.prompt,
         explanation: draft.explanation,
         timeLimitSec: draft.timeLimitSec,
-        rules: { ignoreSpaces: draft.ignoreSpaces, caseInsensitive: draft.caseInsensitive },
-        decoys: lines(draft.decoys),
       };
+      if (draft.type === 'short') {
+        Object.assign(body, {
+          answerDisplay: draft.answerDisplay,
+          accepted: lines(draft.accepted),
+          rules: { ignoreSpaces: draft.ignoreSpaces, caseInsensitive: draft.caseInsensitive },
+          decoys: lines(draft.decoys),
+        });
+      } else if (draft.type === 'choice') {
+        Object.assign(body, { choices: draft.choices.map((c) => ({ text: c.text, imageId: c.imageId })), correct: draft.correct });
+      } else {
+        Object.assign(body, { answer: draft.ox });
+      }
       const path = draft.qid ? `/api/host/sets/${setId}/questions/${draft.qid}` : `/api/host/sets/${setId}/questions`;
       await api(path, { body });
-      setDraft(emptyDraft());
+      setDraft(emptyDraft(draft.type));
       onSaved();
     } catch (e) {
       setErr((e as ApiError).message);
@@ -267,10 +356,29 @@ function QuestionEditor({ setId, draft, setDraft, onSaved }: { setId: string; dr
     }
   };
 
-  const can = draft.imageId && draft.answerDisplay.trim() && !busy;
+  const setChoice = (i: number, patch: Partial<ChoiceDraft>) => setDraft({ ...draft, choices: draft.choices.map((c, k) => (k === i ? { ...c, ...patch } : c)) });
+  const filled = (c: ChoiceDraft) => !!(c.text.trim() || c.imageId);
+  const hasQuestion = !!(draft.imageId || draft.prompt.trim());
+  const can =
+    hasQuestion &&
+    !busy &&
+    (draft.type === 'short'
+      ? !!draft.answerDisplay.trim()
+      : draft.type === 'choice'
+        ? draft.choices.filter(filled).length >= 2 && draft.correct >= 0 && filled(draft.choices[draft.correct])
+        : true);
+  const dirty = draft.qid || draft.imageId || draft.prompt || draft.answerDisplay || draft.choices.some(filled);
+
   return (
     <section className="h-card">
       <h2>{draft.qid ? '문제 고치기' : '문제 추가'}</h2>
+      <div className="q-types" role="radiogroup" aria-label="문제 유형">
+        {(['short', 'choice', 'ox'] as QuestionType[]).map((t) => (
+          <button key={t} type="button" role="radio" aria-checked={draft.type === t} className={'h-btn' + (draft.type === t ? ' primary' : '')} disabled={!!busy} onClick={() => setDraft({ ...draft, type: t })}>
+            {t === 'short' ? '단답형 (글자 입력)' : t === 'choice' ? '객관식 (4지선다)' : 'O / X'}
+          </button>
+        ))}
+      </div>
       <div className="q-editor">
         <div
           className={'q-drop' + (drag ? ' over' : '')}
@@ -286,41 +394,100 @@ function QuestionEditor({ setId, draft, setDraft, onSaved }: { setId: string; dr
             takeFile(e.dataTransfer.files[0]);
           }}
         >
-          {draft.imageUrl ? <img src={draft.imageUrl} alt="문제 사진" /> : <span>사진을 끌어다 놓거나<br />눌러서 고르세요<br /><small>(Ctrl+V 붙여넣기도 됩니다)</small></span>}
+          {draft.imageUrl ? <img src={draft.imageUrl} alt="문제 사진" /> : <span>문제 사진 (선택)<br />끌어다 놓거나 눌러서 고르세요<br /><small>(Ctrl+V 붙여넣기도 됩니다)</small></span>}
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => takeFile(e.target.files?.[0])} />
         </div>
         <div className="q-fields">
-          <label>정답 (전광판에 공개) *
-            <input ref={answerRef} className="h-input" value={draft.answerDisplay} maxLength={30} onChange={(e) => setDraft({ ...draft, answerDisplay: e.target.value })} placeholder="예: 엄마손파이" />
+          {draft.imageUrl && (
+            <div className="h-actions">
+              <button type="button" className="h-btn small" disabled={!!busy} onClick={() => setDraft({ ...draft, imageId: '', imageUrl: '' })}>사진 빼기</button>
+            </div>
+          )}
+          <label>질문 글 {draft.imageId ? '(선택 — 비워 두면 사진만 나옵니다)' : '*'}
+            <input className="h-input" value={draft.prompt} maxLength={80} onChange={(e) => setDraft({ ...draft, prompt: e.target.value })} placeholder={PROMPT_PLACEHOLDER[draft.type]} />
           </label>
-          <label>함께 인정할 답 (한 줄에 하나)
-            <textarea className="h-input" rows={3} value={draft.accepted} onChange={(e) => setDraft({ ...draft, accepted: e.target.value })} placeholder={'예:\n엄마 손 파이\n엄마손'} />
-          </label>
+
+          {draft.type === 'short' && (
+            <>
+              <label>정답 (전광판에 공개) *
+                <input ref={answerRef} className="h-input" value={draft.answerDisplay} maxLength={30} onChange={(e) => setDraft({ ...draft, answerDisplay: e.target.value })} placeholder="예: 엄마손파이" />
+              </label>
+              <label>함께 인정할 답 (한 줄에 하나)
+                <textarea className="h-input" rows={3} value={draft.accepted} onChange={(e) => setDraft({ ...draft, accepted: e.target.value })} placeholder={'예:\n엄마 손 파이\n엄마손'} />
+              </label>
+              <div className="h-row">
+                <label className="h-check"><input type="checkbox" checked={draft.ignoreSpaces} onChange={(e) => setDraft({ ...draft, ignoreSpaces: e.target.checked })} /> 띄어쓰기 무시</label>
+                <label className="h-check"><input type="checkbox" checked={draft.caseInsensitive} onChange={(e) => setDraft({ ...draft, caseInsensitive: e.target.checked })} /> 영문 대소문자 무시</label>
+              </div>
+            </>
+          )}
+
+          {draft.type === 'choice' && (
+            <div className="q-choices">
+              <div className="q-choices-head">보기 (2~4개) · 왼쪽 번호를 눌러 정답을 고르세요 *</div>
+              {draft.choices.map((c, i) => (
+                <div key={i} className={'q-choice' + (draft.correct === i ? ' ok' : '')}>
+                  <label className="q-choice-radio" title="정답으로 지정">
+                    <input type="radio" name="correct" checked={draft.correct === i} onChange={() => setDraft({ ...draft, correct: i })} />
+                    <span>{CIRCLED[i]}</span>
+                  </label>
+                  <input className="h-input" value={c.text} maxLength={40} onChange={(e) => setChoice(i, { text: e.target.value })} placeholder={c.imageUrl ? '(사진 보기 — 글은 선택)' : `보기 ${i + 1}`} />
+                  {c.imageUrl ? (
+                    <span className="q-choice-img">
+                      <img src={c.imageUrl} alt={`보기 ${i + 1} 사진`} />
+                      <button type="button" className="h-btn small" disabled={!!busy} onClick={() => setChoice(i, { imageId: '', imageUrl: '' })}>빼기</button>
+                    </span>
+                  ) : (
+                    <label className="h-btn small q-choice-up" title="이 보기를 사진으로 제시">
+                      사진
+                      <input type="file" accept="image/*" hidden onChange={(e) => { takeChoiceFile(i, e.target.files?.[0]); e.target.value = ''; }} />
+                    </label>
+                  )}
+                </div>
+              ))}
+              <p className="h-hint">보기에 사진을 넣으면 전광판에 그 사진이 보기로 나옵니다(글은 함께 넣어도, 비워도 됩니다). 참가자 휴대폰에는 번호와 글만 보입니다.</p>
+            </div>
+          )}
+
+          {draft.type === 'ox' && (
+            <div className="q-ox">
+              <span className="q-choices-head">정답 *</span>
+              {(['O', 'X'] as const).map((v) => (
+                <button key={v} type="button" className={'q-ox-btn ' + v + (draft.ox === v ? ' on' : '')} aria-pressed={draft.ox === v} onClick={() => setDraft({ ...draft, ox: v })}>
+                  {v}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="h-row">
-            <label className="h-check"><input type="checkbox" checked={draft.ignoreSpaces} onChange={(e) => setDraft({ ...draft, ignoreSpaces: e.target.checked })} /> 띄어쓰기 무시</label>
-            <label className="h-check"><input type="checkbox" checked={draft.caseInsensitive} onChange={(e) => setDraft({ ...draft, caseInsensitive: e.target.checked })} /> 영문 대소문자 무시</label>
             <label className="h-check">제한시간
               <input className="h-input tiny" type="number" min={5} max={300} value={draft.timeLimitSec} onChange={(e) => setDraft({ ...draft, timeLimitSec: Number(e.target.value) })} />초
             </label>
           </div>
           <details>
-            <summary>선택 항목 (질문 글 · 해설 · 봇용 오답 예시)</summary>
-            <label>질문 글 (비워 두면 사진만 나옵니다)
-              <input className="h-input" value={draft.prompt} maxLength={80} onChange={(e) => setDraft({ ...draft, prompt: e.target.value })} placeholder="예: 이 과자의 이름은?" />
-            </label>
+            <summary>선택 항목 (해설{draft.type === 'short' ? ' · 봇용 오답 예시' : ''})</summary>
             <label>해설 (정답 공개 때 보임)
               <input className="h-input" value={draft.explanation} maxLength={300} onChange={(e) => setDraft({ ...draft, explanation: e.target.value })} />
             </label>
-            <label>연습용 봇이 낼 오답 예시 (한 줄에 하나, 채점에는 안 씀)
-              <textarea className="h-input" rows={2} value={draft.decoys} onChange={(e) => setDraft({ ...draft, decoys: e.target.value })} />
-            </label>
+            {draft.type === 'short' && (
+              <label>연습용 봇이 낼 오답 예시 (한 줄에 하나, 채점에는 안 씀)
+                <textarea className="h-input" rows={2} value={draft.decoys} onChange={(e) => setDraft({ ...draft, decoys: e.target.value })} />
+              </label>
+            )}
           </details>
           {err && <p className="h-err">{err}</p>}
           <div className="h-actions">
             <button className="h-btn primary" disabled={!can} onClick={save}>{busy ?? (draft.qid ? '고친 내용 저장' : '＋ 이 문제 추가')}</button>
-            {(draft.qid || draft.imageId) && <button className="h-btn" disabled={!!busy} onClick={() => setDraft(emptyDraft())}>취소</button>}
+            {dirty && <button className="h-btn" disabled={!!busy} onClick={() => setDraft(emptyDraft(draft.type))}>취소</button>}
           </div>
-          <p className="h-hint">채점: 유니코드 정규화·앞뒤 공백 제거 후, 위 규칙으로 정답·인정 답과 정확히 같을 때만 정답입니다. 놓친 표기는 행사 중 진행자 화면의 "정답 인정"으로 추가할 수 있습니다.</p>
+          {draft.type === 'short' ? (
+            <p className="h-hint">채점: 유니코드 정규화·앞뒤 공백 제거 후, 위 규칙으로 정답·인정 답과 정확히 같을 때만 정답입니다. 놓친 표기는 행사 중 진행자 화면의 "정답 인정"으로 추가할 수 있습니다.</p>
+          ) : draft.type === 'choice' ? (
+            <p className="h-hint">참가자는 휴대폰에서 보기 번호 버튼을 누릅니다. 문제·보기 내용은 전광판에 나오고, 정답 공개 때 정답 보기가 강조됩니다.</p>
+          ) : (
+            <p className="h-hint">참가자는 휴대폰에서 O 또는 X 버튼을 누릅니다. 사진이나 질문 글로 문장을 제시하세요.</p>
+          )}
         </div>
       </div>
     </section>
@@ -356,19 +523,7 @@ function SetDetail({ set, onChanged, onDeleted, onSolo }: { set: FullSet; onChan
     call(`/api/host/sets/${set.id}/order`, { qids: ids });
   };
   const edit = (q: Q) => {
-    setDraft({
-      qid: q.id,
-      imageId: q.image.split('/').pop() ?? '',
-      imageUrl: q.image,
-      answerDisplay: q.answerDisplay,
-      accepted: q.accepted.filter((a) => a !== q.answerDisplay).join('\n'),
-      prompt: q.prompt,
-      explanation: q.explanation,
-      timeLimitSec: q.timeLimitSec,
-      ignoreSpaces: q.rules.ignoreSpaces,
-      caseInsensitive: q.rules.caseInsensitive,
-      decoys: (q.decoys ?? []).join('\n'),
-    });
+    setDraft(draftFrom(q));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -415,19 +570,30 @@ function SetDetail({ set, onChanged, onDeleted, onSolo }: { set: FullSet; onChan
           <label className="h-check"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> 정답 보기</label>
         </div>
         {err && <p className="h-err">{err}</p>}
-        {set.questions.length === 0 && <p className="h-hint">아직 문제가 없습니다. 위에서 사진과 정답을 넣어 추가하세요.</p>}
+        {set.questions.length === 0 && <p className="h-hint">아직 문제가 없습니다. 위에서 유형을 고르고 사진이나 질문 글을 넣어 추가하세요.</p>}
         <div className="s-grid">
           {set.questions.map((q, i) => (
             <article key={q.id} className={'s-card' + (draft.qid === q.id ? ' editing' : '')}>
-              <img src={q.image} alt={q.imageAlt} loading="lazy" />
+              {q.image ? <img src={q.image} alt={q.imageAlt} loading="lazy" /> : <div className="s-noimg">{TYPE_LABEL[q.type ?? 'short']}</div>}
               <div className="s-body">
-                <div className="s-no">{i + 1}번 · {q.timeLimitSec}초</div>
+                <div className="s-no">{i + 1}번 · {TYPE_LABEL[q.type ?? 'short']} · {q.timeLimitSec}초</div>
                 {q.prompt && <div className="s-prompt">{q.prompt}</div>}
+                {q.type === 'choice' && (
+                  <ol className="s-choices">
+                    {(q.choices ?? []).map((c, k) => (
+                      <li key={k} className={show && q.accepted.includes(String(k + 1)) ? 'ok' : ''}>
+                        <span>{CIRCLED[k]}</span>
+                        {c.image && <img src={c.image} alt="" loading="lazy" />}
+                        {c.text && <span>{c.text}</span>}
+                      </li>
+                    ))}
+                  </ol>
+                )}
                 {show ? (
                   <>
                     <div className="s-ans">정답 <b>{q.answerDisplay}</b></div>
-                    {q.accepted.length > 1 && <div className="s-meta">인정: {q.accepted.join(', ')}</div>}
-                    <div className="s-meta">띄어쓰기 {q.rules.ignoreSpaces ? '무시' : '구분'} · 대소문자 {q.rules.caseInsensitive ? '무시' : '구분'}</div>
+                    {(q.type ?? 'short') === 'short' && q.accepted.length > 1 && <div className="s-meta">인정: {q.accepted.join(', ')}</div>}
+                    {(q.type ?? 'short') === 'short' && <div className="s-meta">띄어쓰기 {q.rules.ignoreSpaces ? '무시' : '구분'} · 대소문자 {q.rules.caseInsensitive ? '무시' : '구분'}</div>}
                     {q.explanation && <div className="s-exp">{q.explanation}</div>}
                   </>
                 ) : (
@@ -465,7 +631,7 @@ function Solo({ set, order, timer, onExit }: { set: FullSet; order: Q[]; timer: 
   // 문제마다 타이머 시작
   useEffect(() => {
     if (!q || check) return;
-    inputRef.current?.focus();
+    if ((q.type ?? 'short') === 'short') inputRef.current?.focus();
     if (!limit) {
       setLeft(null);
       return;
@@ -547,11 +713,11 @@ function Solo({ set, order, timer, onExit }: { set: FullSet; order: Q[]; timer: 
         <p className="h-hint">{score === results.length ? '모두 맞혔습니다!' : `틀린 문제 ${wrong.length}개`}</p>
         {wrong.map((r) => (
           <div key={r.q.id} className="solo-wrong">
-            <img src={r.q.image} alt="" />
+            {r.q.image ? <img src={r.q.image} alt="" /> : <div className="solo-wrong-noimg">{TYPE_LABEL[r.q.type ?? 'short']}</div>}
             <div>
               {r.q.prompt && <div className="s-prompt">{r.q.prompt}</div>}
               <div className="s-meta">
-                내 답: {r.skipped ? '(건너뜀)' : r.text || '(없음)'} {r.timeout && '· 시간 초과'}
+                내 답: {r.skipped ? '(건너뜀)' : answerLabel(r.q, r.text) || '(없음)'} {r.timeout && '· 시간 초과'}
               </div>
               <div className="s-ans">정답 <b>{r.q.answerDisplay}</b></div>
             </div>
@@ -576,13 +742,35 @@ function Solo({ set, order, timer, onExit }: { set: FullSet; order: Q[]; timer: 
         <div className={'solo-timer' + (left !== null && left <= 3 ? ' hurry' : '')}>{left === null ? '' : `${left}초`}</div>
       </header>
       <main className="solo-main">
-        <img className="solo-img" src={q.image} alt={q.imageAlt} />
+        {q.image && <img className="solo-img" src={q.image} alt={q.imageAlt} />}
         {q.prompt && <div className="solo-prompt">{q.prompt}</div>}
+        {q.type === 'choice' && (
+          <div className={'p-choices' + ((q.choices ?? []).some((c) => c.image) ? ' with-img' : '')}>
+            {(q.choices ?? []).map((c, k) => (
+              <button key={k} type="button" className={'p-choice' + (check && q.accepted.includes(String(k + 1)) ? ' ok' : '') + (check?.text?.startsWith(CIRCLED[k]) ? ' picked' : '')} disabled={busy || !!check} onClick={() => grade(String(k + 1), 'submit')}>
+                <span className="p-choice-no">{CIRCLED[k]}</span>
+                {c.image && <img src={c.image} alt="" />}
+                {c.text && <span className="p-choice-t">{c.text}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+        {q.type === 'ox' && (
+          <div className="p-oxs">
+            {(['O', 'X'] as const).map((v) => (
+              <button key={v} type="button" className={'p-ox ' + v + (check && q.accepted[0] === v ? ' ok' : '')} disabled={busy || !!check} onClick={() => grade(v, 'submit')}>
+                {v}
+              </button>
+            ))}
+          </div>
+        )}
         {!check ? (
           <div className="solo-input">
-            <input ref={inputRef} className="p-input answer" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} placeholder="정답을 입력하세요" autoComplete="off" spellCheck={false} maxLength={40} />
+            {(q.type ?? 'short') === 'short' && (
+              <input ref={inputRef} className="p-input answer" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} placeholder="정답을 입력하세요" autoComplete="off" spellCheck={false} maxLength={40} />
+            )}
             <div className="h-actions">
-              <button className="h-btn primary" disabled={busy || !text.trim()} onClick={() => grade(text, 'submit')}>제출 (Enter)</button>
+              {(q.type ?? 'short') === 'short' && <button className="h-btn primary" disabled={busy || !text.trim()} onClick={() => grade(text, 'submit')}>제출 (Enter)</button>}
               <button className="h-btn" disabled={busy} onClick={() => grade(text, 'skip')}>모르겠어요</button>
             </div>
           </div>

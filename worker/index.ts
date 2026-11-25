@@ -7,7 +7,7 @@ import { validateQuestion } from './quiz/validate';
 import { LibraryDO, MAX_MEDIA_BYTES } from './library-do';
 import { cleanAnswer, isCorrect, normKey } from './quiz/grading';
 import { EventDO, type JoinResult, type SubmitBody } from './event-do';
-import { JOIN_KINDS, cleanName } from '../shared/protocol';
+import { JOIN_KINDS, answerLabel, cleanName } from '../shared/protocol';
 import { BotsDO } from './bots-do';
 import {
   COOKIE,
@@ -419,10 +419,11 @@ async function route(req: Request, env: Env): Promise<Response> {
       const set = typeof b.set === 'string' ? await findSet(b.set) : null;
       const q = set?.questions.find((x) => x.id === b.qid);
       if (!q) throw new HttpError(404, 'QID', '없는 문제입니다.');
-      const text = typeof b.text === 'string' ? b.text.slice(0, 100) : '';
+      let text = typeof b.text === 'string' ? b.text.slice(0, 100) : '';
+      if (q.type === 'ox') text = text.trim().toUpperCase();
       return json({
         correct: isCorrect(text, q.accepted, q.rules),
-        text: cleanAnswer(text),
+        text: answerLabel(q, cleanAnswer(text)),
         norm: normKey(text, q.rules),
         answerDisplay: q.answerDisplay,
         explanation: q.explanation,
